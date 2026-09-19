@@ -30,6 +30,19 @@ function nextNumber(company, type) {
   const prefix = type === "quote" ? "QUO" : "INV";
   return prefix + "-" + String(n || 1).padStart(4, "0");
 }
+function bankDetailsLines(company) {
+  const rows = [
+    ["Account Holder", company.bank_account_holder],
+    ["Bank Name", company.bank_name],
+    ["Account Type", company.bank_account_type],
+    ["Branch Code", company.bank_branch_code],
+    ["Account Number", company.bank_account_number]
+  ].filter(([, v]) => v && v.trim());
+  return rows.map(([label, v]) => `${label}: ${v}`);
+}
+function hasBankDetails(company) {
+  return bankDetailsLines(company).length > 0;
+}
 function boltLogoPNG() {
   const canvas = document.createElement("canvas");
   canvas.width = 160;
@@ -164,7 +177,7 @@ function downloadPdf(doc, company) {
     pdf.text("R" + money(totals.total), pageW - marginX, totalLineY + 16, { align: "right" });
 
     let noteY = totalLineY + 44;
-    if (company.bank_details) {
+    if (hasBankDetails(company)) {
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(9);
       pdf.setTextColor(26, 31, 43);
@@ -172,7 +185,7 @@ function downloadPdf(doc, company) {
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(9);
       pdf.setTextColor(90, 95, 110);
-      const bankLines = pdf.splitTextToSize(company.bank_details, pageW - marginX * 2);
+      const bankLines = bankDetailsLines(company);
       pdf.text(bankLines, marginX, noteY + 13);
       noteY += 13 + bankLines.length * 11 + 12;
     }
@@ -279,7 +292,6 @@ function Setup({ which, existingUsernames, onCreated }) {
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [logo, setLogo] = useState(null);
-  const [bankDetails, setBankDetails] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -300,7 +312,6 @@ function Setup({ which, existingUsernames, onCreated }) {
       address: address.trim(),
       email: email.trim(),
       phone: phone.trim(),
-      bank_details: bankDetails.trim(),
       logo,
       username: username.trim(),
       password,
@@ -345,15 +356,9 @@ function Setup({ which, existingUsernames, onCreated }) {
             </div>
           </div>
           <LogoPicker value={logo} onChange={setLogo} />
-          <div className="field">
-            <label>Banking details (optional — shown on every quote &amp; invoice)</label>
-            <textarea
-              rows={3}
-              value={bankDetails}
-              onChange={(e) => setBankDetails(e.target.value)}
-              placeholder={"e.g.\nAccount holder: ...\nBank: ...\nAccount number: ..."}
-            />
-          </div>
+          <p className="hint" style={{ marginTop: -8, marginBottom: 16 }}>
+            You can add banking details after setup, from "Edit logo" in the top bar.
+          </p>
           <div className="field">
             <label>Login username</label>
             <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. alder-admin" />
@@ -457,7 +462,11 @@ function Settings({ company, onSaved, onCancel, onLogout }) {
   const [email, setEmail] = useState(company.email || "");
   const [phone, setPhone] = useState(company.phone || "");
   const [logo, setLogo] = useState(company.logo || null);
-  const [bankDetails, setBankDetails] = useState(company.bank_details || "");
+  const [bankAccountHolder, setBankAccountHolder] = useState(company.bank_account_holder || "");
+  const [bankName, setBankName] = useState(company.bank_name || "");
+  const [bankAccountType, setBankAccountType] = useState(company.bank_account_type || "");
+  const [bankBranchCode, setBankBranchCode] = useState(company.bank_branch_code || "");
+  const [bankAccountNumber, setBankAccountNumber] = useState(company.bank_account_number || "");
   const [saving, setSaving] = useState(false);
 
   async function save() {
@@ -470,7 +479,11 @@ function Settings({ company, onSaved, onCancel, onLogout }) {
         email: email.trim(),
         phone: phone.trim(),
         logo,
-        bank_details: bankDetails.trim()
+        bank_account_holder: bankAccountHolder.trim(),
+        bank_name: bankName.trim(),
+        bank_account_type: bankAccountType.trim(),
+        bank_branch_code: bankBranchCode.trim(),
+        bank_account_number: bankAccountNumber.trim()
       })
       .eq("id", company.id)
       .select()
@@ -509,14 +522,32 @@ function Settings({ company, onSaved, onCancel, onLogout }) {
             <input value={phone} onChange={(e) => setPhone(e.target.value)} />
           </div>
         </div>
+        <h3 style={{ fontSize: "12.5px", textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--ink-soft)", margin: "22px 0 12px", fontWeight: 600 }}>
+          Banking details (shown on every quote &amp; invoice)
+        </h3>
+        <div className="field-row">
+          <div className="field">
+            <label>Account Holder</label>
+            <input value={bankAccountHolder} onChange={(e) => setBankAccountHolder(e.target.value)} placeholder="e.g. Kabir Singh" />
+          </div>
+          <div className="field">
+            <label>Bank Name</label>
+            <input value={bankName} onChange={(e) => setBankName(e.target.value)} placeholder="e.g. Nedbank" />
+          </div>
+        </div>
+        <div className="field-row">
+          <div className="field">
+            <label>Account Type</label>
+            <input value={bankAccountType} onChange={(e) => setBankAccountType(e.target.value)} placeholder="e.g. Current Account" />
+          </div>
+          <div className="field">
+            <label>Branch Code</label>
+            <input value={bankBranchCode} onChange={(e) => setBankBranchCode(e.target.value)} placeholder="e.g. 198765" />
+          </div>
+        </div>
         <div className="field">
-          <label>Banking details (shown on every quote &amp; invoice)</label>
-          <textarea
-            rows={4}
-            value={bankDetails}
-            onChange={(e) => setBankDetails(e.target.value)}
-            placeholder={"e.g.\nAccount holder: ...\nBank: ...\nAccount number: ...\nBranch code: ..."}
-          />
+          <label>Account Number</label>
+          <input value={bankAccountNumber} onChange={(e) => setBankAccountNumber(e.target.value)} placeholder="e.g. 1342914503" />
         </div>
         <div className="form-actions">
           <button className="btn" onClick={onCancel}>
@@ -949,12 +980,16 @@ function DocumentView({ company, doc, onBack, onLogout, onEdit, onChanged, onDel
             </div>
           </div>
 
-          {(company.bank_details || doc.notes || doc.terms) && (
+          {(hasBankDetails(company) || doc.notes || doc.terms) && (
             <div className="sheet-notes">
-              {company.bank_details && (
+              {hasBankDetails(company) && (
                 <div>
                   <b>Banking details:</b>
-                  <div style={{ whiteSpace: "pre-line" }}>{company.bank_details}</div>
+                  <div>
+                    {bankDetailsLines(company).map((line, i) => (
+                      <div key={i}>{line}</div>
+                    ))}
+                  </div>
                 </div>
               )}
               {doc.notes && (

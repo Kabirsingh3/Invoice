@@ -76,3 +76,11 @@ grant select, insert, update, delete on documents to anon, authenticated;
 -- ---------------------------------------------------------------------
 alter table companies add column if not exists bank_details text default '';
 alter table documents add column if not exists tax_enabled boolean not null default true;
+
+-- Structured banking detail fields (replaces the single bank_details textbox
+-- with separate labeled fields, matching a typical SA invoice layout).
+alter table companies add column if not exists bank_account_holder text default '';
+alter table companies add column if not exists bank_name text default '';
+alter table companies add column if not exists bank_account_type text default '';
+alter table companies add column if not exists bank_branch_code text default '';
+alter table companies add column if not exists bank_account_number text default '';

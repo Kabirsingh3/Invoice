@@ -43,5 +43,5 @@ Any time you want to make a change: update the files in the GitHub repo (edit di
 
 - **Login is simple, not bulletproof.** See the security note at the top of `supabase-schema.sql` — the two-company separation is enforced by the app's UI, not by real authentication. Fine for keeping the two companies' day-to-day work apart; don't store highly sensitive data in it.
 - **Adding a logo later:** once logged in, use "Edit logo" in the top bar.
-- **Banking details:** set once per company under "Edit logo" (the same settings screen) — it then shows automatically on every quote and invoice.
+- **Banking details:** set once per company under "Edit logo" (the same settings screen) — separate fields for Account Holder, Bank Name, Account Type, Branch Code, and Account Number, shown automatically on every quote and invoice.
 
