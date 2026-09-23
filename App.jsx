@@ -65,11 +65,27 @@ function boltLogoPNG() {
 // ---------------- PDF export ----------------
 function downloadPdf(doc, company) {
   const totals = computeTotals(doc.items, doc.tax_enabled ? doc.tax_rate : 0);
+  const ACCENT = [30, 58, 95];
+  const ACCENT_DARK = [18, 42, 71];
+  const GOLD = [156, 122, 46];
+  const INK = [20, 26, 36];
+  const INK_SOFT = [91, 100, 114];
+  const LINE = [219, 223, 217];
+  const PAPER_ALT = [228, 231, 225];
+
   try {
     const pdf = new jsPDF({ unit: "pt", format: "a4" });
     const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
     const marginX = 48;
-    let y = 56;
+
+    // Header band across the top of the page, echoing the in-app accent bar.
+    pdf.setFillColor(...ACCENT);
+    pdf.rect(0, 0, pageW * 0.82, 7, "F");
+    pdf.setFillColor(...GOLD);
+    pdf.rect(pageW * 0.82, 0, pageW * 0.18, 7, "F");
+
+    let y = 46;
 
     // Logo sits above the company name on the left, so it never collides
     // with the title/number block on the right.
@@ -77,58 +93,64 @@ function downloadPdf(doc, company) {
     if (company.logo) {
       try {
         const fmt = company.logo.includes("image/png") ? "PNG" : "JPEG";
-        pdf.addImage(company.logo, fmt, marginX, y - 10, 44, 44, undefined, "FAST");
+        pdf.addImage(company.logo, fmt, marginX, y - 8, 42, 42, undefined, "FAST");
         nameY = y + 50;
       } catch (e) {}
     }
 
     pdf.setFont("times", "bold");
-    pdf.setFontSize(15);
-    pdf.setTextColor(26, 31, 43);
+    pdf.setFontSize(16);
+    pdf.setTextColor(...INK);
     pdf.text(company.name || "", marginX, nameY);
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(9.5);
-    pdf.setTextColor(90, 95, 110);
+    pdf.setTextColor(...INK_SOFT);
     const addrLines = pdf.splitTextToSize(
       [company.address, company.email, company.phone].filter(Boolean).join("\n"),
       260
     );
     pdf.text(addrLines, marginX, nameY + 18);
 
-    pdf.setTextColor(26, 31, 43);
     pdf.setFont("times", "bold");
-    pdf.setFontSize(20);
-    pdf.text(doc.type === "quote" ? "Quote" : "Invoice", pageW - marginX, y, { align: "right" });
+    pdf.setFontSize(24);
+    pdf.setTextColor(...ACCENT);
+    pdf.text(doc.type === "quote" ? "Quote" : "Invoice", pageW - marginX, y + 6, { align: "right" });
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(9.5);
-    pdf.setTextColor(90, 95, 110);
-    pdf.text(`Number: ${doc.number}`, pageW - marginX, y + 18, { align: "right" });
-    pdf.text(`Issued: ${fmtDate(doc.issue_date)}`, pageW - marginX, y + 31, { align: "right" });
+    pdf.setTextColor(...INK_SOFT);
+    pdf.text(`Number: ${doc.number}`, pageW - marginX, y + 26, { align: "right" });
+    pdf.text(`Issued: ${fmtDate(doc.issue_date)}`, pageW - marginX, y + 40, { align: "right" });
     pdf.text(
       `${doc.type === "quote" ? "Valid until" : "Due"}: ${fmtDate(doc.due_date)}`,
       pageW - marginX,
-      y + 44,
+      y + 54,
       { align: "right" }
     );
 
-    y = Math.max(nameY + 18 + addrLines.length * 11, y + 60) + 30;
-    pdf.setTextColor(26, 31, 43);
+    y = Math.max(nameY + 18 + addrLines.length * 11, y + 74) + 26;
+
+    // Billed-to block gets a soft shaded background, like the in-app sheet.
+    const billBoxH = 62;
+    pdf.setFillColor(...PAPER_ALT);
+    pdf.roundedRect(marginX, y - 16, pageW - marginX * 2, billBoxH, 4, 4, "F");
     pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(9);
-    pdf.text("BILLED TO", marginX, y);
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(...INK_SOFT);
+    pdf.text("BILLED TO", marginX + 14, y);
     pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(11);
-    pdf.text(doc.client_name || "", marginX, y + 15);
+    pdf.setFontSize(11.5);
+    pdf.setTextColor(...INK);
+    pdf.text(doc.client_name || "", marginX + 14, y + 16);
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(9.5);
-    pdf.setTextColor(90, 95, 110);
+    pdf.setTextColor(...INK_SOFT);
     const clientLines = pdf.splitTextToSize(
       [doc.client_address, doc.client_email].filter(Boolean).join("\n"),
-      300
+      pageW - marginX * 2 - 28
     );
-    pdf.text(clientLines, marginX, y + 29);
+    pdf.text(clientLines, marginX + 14, y + 30);
 
-    y += 60;
+    y += billBoxH + 22;
     const body = doc.items.map((it) => [
       it.desc,
       String(it.qty),
@@ -142,75 +164,95 @@ function downloadPdf(doc, company) {
       head: [["Description", "Qty", "Price", "Amount"]],
       body,
       theme: "plain",
-      styles: { font: "helvetica", fontSize: 9.5, textColor: [26, 31, 43], cellPadding: { top: 7, bottom: 7, left: 4, right: 4 } },
-      headStyles: { fontStyle: "bold", fontSize: 8.5, textColor: [91, 99, 118], lineWidth: { bottom: 1 }, lineColor: [26, 31, 43] },
+      styles: { font: "helvetica", fontSize: 9.5, textColor: INK, cellPadding: { top: 8, bottom: 8, left: 10, right: 10 } },
+      headStyles: { fontStyle: "bold", fontSize: 8.5, textColor: [255, 255, 255], fillColor: ACCENT, cellPadding: { top: 8, bottom: 8, left: 10, right: 10 } },
+      alternateRowStyles: { fillColor: PAPER_ALT },
       columnStyles: { 1: { halign: "right", cellWidth: 50 }, 2: { halign: "right", cellWidth: 80 }, 3: { halign: "right", cellWidth: 80 } },
       didParseCell: (data) => {
         if (data.section === "body") {
-          data.cell.styles.lineColor = [218, 212, 197];
+          data.cell.styles.lineColor = LINE;
           data.cell.styles.lineWidth = { bottom: 0.5 };
         }
       }
     });
 
     let finalY = pdf.lastAutoTable.finalY + 18;
-    const totalsX = pageW - marginX - 160;
+    const boxW = 210;
+    const totalsX = pageW - marginX - boxW + 14;
+    const totalsRight = pageW - marginX - 14;
     pdf.setFont("helvetica", "normal");
     pdf.setFontSize(9.5);
-    pdf.setTextColor(90, 95, 110);
+    pdf.setTextColor(...INK_SOFT);
     pdf.text("Subtotal", totalsX, finalY);
-    pdf.text("R" + money(totals.subtotal), pageW - marginX, finalY, { align: "right" });
-    let totalLineY = finalY + 16;
+    pdf.text("R" + money(totals.subtotal), totalsRight, finalY, { align: "right" });
+    let afterLinesY = finalY + 16;
     if (doc.tax_enabled) {
-      pdf.text(`Tax (${doc.tax_rate}%)`, totalsX, finalY + 16);
-      pdf.text("R" + money(totals.tax), pageW - marginX, finalY + 16, { align: "right" });
-      totalLineY = finalY + 26;
+      pdf.text(`Tax (${doc.tax_rate}%)`, totalsX, afterLinesY);
+      pdf.text("R" + money(totals.tax), totalsRight, afterLinesY, { align: "right" });
+      afterLinesY += 16;
     } else {
-      totalLineY = finalY + 10;
+      afterLinesY += 4;
     }
-    pdf.setDrawColor(26, 31, 43);
-    pdf.line(totalsX, totalLineY, pageW - marginX, totalLineY);
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(12);
-    pdf.setTextColor(26, 31, 43);
-    pdf.text("Total", totalsX, totalLineY + 16);
-    pdf.text("R" + money(totals.total), pageW - marginX, totalLineY + 16, { align: "right" });
 
-    let noteY = totalLineY + 44;
+    // Highlighted total box, echoing the app's filled totals-row.grand style.
+    const totalBoxY = afterLinesY + 6;
+    const totalBoxH = 32;
+    pdf.setFillColor(...ACCENT);
+    pdf.roundedRect(pageW - marginX - boxW, totalBoxY, boxW, totalBoxH, 5, 5, "F");
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(12.5);
+    pdf.setTextColor(255, 255, 255);
+    pdf.text("Total", pageW - marginX - boxW + 14, totalBoxY + 21);
+    pdf.text("R" + money(totals.total), totalsRight, totalBoxY + 21, { align: "right" });
+
+    let noteY = totalBoxY + totalBoxH + 34;
     if (hasBankDetails(company)) {
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(9);
-      pdf.setTextColor(26, 31, 43);
+      pdf.setTextColor(...INK);
       pdf.text("Banking details", marginX, noteY);
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(9);
-      pdf.setTextColor(90, 95, 110);
+      pdf.setTextColor(...INK_SOFT);
       const bankLines = bankDetailsLines(company);
       pdf.text(bankLines, marginX, noteY + 13);
-      noteY += 13 + bankLines.length * 11 + 12;
+      noteY += 13 + bankLines.length * 11 + 14;
     }
     if (doc.notes) {
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(9);
-      pdf.setTextColor(26, 31, 43);
+      pdf.setTextColor(...INK);
       pdf.text("Notes", marginX, noteY);
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(9);
-      pdf.setTextColor(90, 95, 110);
+      pdf.setTextColor(...INK_SOFT);
       const lines = pdf.splitTextToSize(doc.notes, pageW - marginX * 2);
       pdf.text(lines, marginX, noteY + 13);
-      noteY += 13 + lines.length * 11 + 12;
+      noteY += 13 + lines.length * 11 + 14;
     }
     if (doc.terms) {
       pdf.setFont("helvetica", "bold");
       pdf.setFontSize(9);
-      pdf.setTextColor(26, 31, 43);
+      pdf.setTextColor(...INK);
       pdf.text("Terms", marginX, noteY);
       pdf.setFont("helvetica", "normal");
       pdf.setFontSize(9);
-      pdf.setTextColor(90, 95, 110);
-      pdf.text(pdf.splitTextToSize(doc.terms, pageW - marginX * 2), marginX, noteY + 13);
+      pdf.setTextColor(...INK_SOFT);
+      const termLines = pdf.splitTextToSize(doc.terms, pageW - marginX * 2);
+      pdf.text(termLines, marginX, noteY + 13);
+      noteY += 13 + termLines.length * 11 + 14;
     }
+
+    // Footer: thin rule + a quiet closing line, anchored near the bottom of
+    // the page (but pulled up if content already runs long).
+    const footerY = Math.max(noteY + 16, pageH - 60);
+    pdf.setDrawColor(...LINE);
+    pdf.setLineWidth(0.75);
+    pdf.line(marginX, footerY, pageW - marginX, footerY);
+    pdf.setFont("helvetica", "italic");
+    pdf.setFontSize(9);
+    pdf.setTextColor(...INK_SOFT);
+    pdf.text("Thank you for the opportunity to work with you.", pageW / 2, footerY + 18, { align: "center" });
 
     pdf.save(`${doc.number}.pdf`);
   } catch (err) {
@@ -220,7 +262,7 @@ function downloadPdf(doc, company) {
 }
 
 // ---------------- Topbar ----------------
-function Topbar({ company, onLogout, onEdit }) {
+function Topbar({ company, onLogout, onEdit, subtitle }) {
   return (
     <div className="topbar">
       <div className="brand">
@@ -230,7 +272,10 @@ function Topbar({ company, onLogout, onEdit }) {
       {company && (
         <div className="company-chip">
           {company.logo && <img src={company.logo} alt="" />}
-          <span className="cname">{company.name}</span>
+          <span className="cname">
+            {company.name}
+            {subtitle && <span style={{ fontWeight: 400, color: "var(--ink-soft)" }}> — {subtitle}</span>}
+          </span>
           {onEdit && (
             <button className="btn btn-quiet btn-sm" onClick={onEdit}>
               Edit logo
@@ -381,7 +426,7 @@ function Setup({ which, existingUsernames, onCreated }) {
 }
 
 // ---------------- Login ----------------
-function Login({ companies, onLoggedIn }) {
+function Login({ companies, technicians, onLoggedIn }) {
   const [picked, setPicked] = useState(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -416,10 +461,17 @@ function Login({ companies, onLoggedIn }) {
 
   function submit() {
     if (username === picked.username && password === picked.password) {
-      onLoggedIn(picked);
-    } else {
-      setError("Incorrect username or password.");
+      onLoggedIn({ role: "admin", company: picked });
+      return;
     }
+    const tech = technicians.find(
+      (t) => t.company_id === picked.id && t.username === username && t.password === password
+    );
+    if (tech) {
+      onLoggedIn({ role: "technician", company: picked, technician: tech });
+      return;
+    }
+    setError("Incorrect username or password.");
   }
 
   return (
@@ -428,7 +480,7 @@ function Login({ companies, onLoggedIn }) {
       <div className="center-screen">
         <div className="panel">
           <h1>{picked.name}</h1>
-          <p className="sub">Sign in to view this company's quotes and invoices.</p>
+          <p className="sub">Sign in as the company admin, or as a technician.</p>
           <div className="field">
             <label>Username</label>
             <input value={username} onChange={(e) => setUsername(e.target.value)} />
@@ -562,13 +614,31 @@ function Settings({ company, onSaved, onCancel, onLogout }) {
   );
 }
 
+// ---------------- Admin section tabs (shared by document/job-card/technician screens) ----------------
+function AdminTabs({ active, onChange }) {
+  return (
+    <div className="tabs">
+      {[
+        ["documents", "Quotes & Invoices"],
+        ["jobcards", "Job Cards"],
+        ["technicians", "Technicians"]
+      ].map(([key, label]) => (
+        <button key={key} className={`tab ${active === key ? "active" : ""}`} onClick={() => onChange(key)}>
+          {label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ---------------- Dashboard ----------------
-function Dashboard({ company, docs, onLogout, onEdit, onNew, onOpen, filter, setFilter }) {
+function Dashboard({ company, docs, onLogout, onEdit, onNew, onOpen, filter, setFilter, onSection }) {
   const filtered = docs.filter((d) => (filter === "all" ? true : d.type === filter));
   return (
     <>
       <Topbar company={company} onLogout={onLogout} onEdit={onEdit} />
       <div className="container">
+        {onSection && <AdminTabs active="documents" onChange={onSection} />}
         <div className="toolbar">
           <div className="filters">
             {["all", "quote", "invoice"].map((f) => (
@@ -587,42 +657,44 @@ function Dashboard({ company, docs, onLogout, onEdit, onNew, onOpen, filter, set
             <div>Create your first quote or invoice for {company.name}.</div>
           </div>
         ) : (
-          <table className="doclist">
-            <thead>
-              <tr>
-                <th>Number</th>
-                <th>Type</th>
-                <th>Client</th>
-                <th>Date</th>
-                <th>Status</th>
-                <th style={{ textAlign: "right" }}>Total</th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered
-                .slice()
-                .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
-                .map((d) => {
-                  const t = computeTotals(d.items, d.tax_enabled ? d.tax_rate : 0);
-                  return (
-                    <tr key={d.id} className="row" onClick={() => onOpen(d)}>
-                      <td className="num-cell">{d.number}</td>
-                      <td>
-                        <span className={`type-pill ${d.type === "quote" ? "type-quote" : "type-invoice"}`}>
-                          {d.type === "quote" ? "Quote" : "Invoice"}
-                        </span>
-                      </td>
-                      <td>{d.client_name}</td>
-                      <td>{fmtDate(d.issue_date)}</td>
-                      <td>
-                        <span className={`status-pill status-${d.status}`}>{d.status}</span>
-                      </td>
-                      <td className="amt-cell">R{money(t.total)}</td>
-                    </tr>
-                  );
-                })}
-            </tbody>
-          </table>
+          <div className="doclist-wrap">
+            <table className="doclist">
+              <thead>
+                <tr>
+                  <th>Number</th>
+                  <th>Type</th>
+                  <th>Client</th>
+                  <th>Date</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: "right" }}>Total</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filtered
+                  .slice()
+                  .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+                  .map((d) => {
+                    const t = computeTotals(d.items, d.tax_enabled ? d.tax_rate : 0);
+                    return (
+                      <tr key={d.id} className="row" onClick={() => onOpen(d)}>
+                        <td className="num-cell">{d.number}</td>
+                        <td>
+                          <span className={`type-pill ${d.type === "quote" ? "type-quote" : "type-invoice"}`}>
+                            {d.type === "quote" ? "Quote" : "Invoice"}
+                          </span>
+                        </td>
+                        <td>{d.client_name}</td>
+                        <td>{fmtDate(d.issue_date)}</td>
+                        <td>
+                          <span className={`status-pill status-${d.status}`}>{d.status}</span>
+                        </td>
+                        <td className="amt-cell">R{money(t.total)}</td>
+                      </tr>
+                    );
+                  })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
     </>
@@ -630,7 +702,8 @@ function Dashboard({ company, docs, onLogout, onEdit, onNew, onOpen, filter, set
 }
 
 // ---------------- New / edit document form ----------------
-function DocumentForm({ company, initial, onCancel, onSaved, onLogout, onEdit }) {
+function DocumentForm({ company, initial, onCancel, onSaved, onUpdated, onLogout, onEdit }) {
+  const isEditing = !!initial.editingId;
   const [type, setType] = useState(initial.type);
   const [clientName, setClientName] = useState(initial.client.name);
   const [clientEmail, setClientEmail] = useState(initial.client.email);
@@ -666,6 +739,35 @@ function DocumentForm({ company, initial, onCancel, onSaved, onLogout, onEdit })
     cleanItems = cleanItems.map((it) => ({ desc: it.desc, qty: Number(it.qty) || 0, price: Number(it.price) || 0 }));
 
     setSaving(true);
+
+    if (isEditing) {
+      const { data: updatedDoc, error: updateError } = await supabase
+        .from("documents")
+        .update({
+          client_name: clientName.trim(),
+          client_address: clientAddress.trim(),
+          client_email: clientEmail.trim(),
+          issue_date: issueDate,
+          due_date: dueDate,
+          items: cleanItems,
+          tax_enabled: taxEnabled,
+          tax_rate: taxEnabled ? Number(taxRate) || 0 : 0,
+          notes: notes.trim(),
+          terms: terms.trim()
+        })
+        .eq("id", initial.editingId)
+        .select()
+        .single();
+
+      setSaving(false);
+      if (updateError) {
+        alert("Couldn't save: " + updateError.message);
+        return;
+      }
+      onUpdated(updatedDoc);
+      return;
+    }
+
     const number = nextNumber(company, type);
 
     const { data: newDoc, error: insertError } = await supabase
@@ -717,13 +819,18 @@ function DocumentForm({ company, initial, onCancel, onSaved, onLogout, onEdit })
       <Topbar company={company} onLogout={onLogout} onEdit={onEdit} />
       <div className="container">
         <div className="type-toggle">
-          <button className={type === "quote" ? "active" : ""} onClick={() => setType("quote")}>
+          <button className={type === "quote" ? "active" : ""} disabled={isEditing} onClick={() => !isEditing && setType("quote")}>
             Quote
           </button>
-          <button className={type === "invoice" ? "active" : ""} onClick={() => setType("invoice")}>
+          <button className={type === "invoice" ? "active" : ""} disabled={isEditing} onClick={() => !isEditing && setType("invoice")}>
             Invoice
           </button>
         </div>
+        {isEditing && (
+          <p className="hint" style={{ marginTop: -14, marginBottom: 18 }}>
+            Editing {initial.number} — the type and number stay fixed once created.
+          </p>
+        )}
 
         <div className="form-section">
           <h3>Client</h3>
@@ -849,7 +956,7 @@ function DocumentForm({ company, initial, onCancel, onSaved, onLogout, onEdit })
             Cancel
           </button>
           <button className="btn btn-primary" disabled={saving} onClick={save}>
-            {saving ? "Saving…" : `Save ${type}`}
+            {saving ? "Saving…" : isEditing ? "Save changes" : `Save ${type}`}
           </button>
         </div>
       </div>
@@ -858,7 +965,7 @@ function DocumentForm({ company, initial, onCancel, onSaved, onLogout, onEdit })
 }
 
 // ---------------- View document ----------------
-function DocumentView({ company, doc, onBack, onLogout, onEdit, onChanged, onDeleted, onConvert }) {
+function DocumentView({ company, doc, onBack, onLogout, onEdit, onEditDoc, onChanged, onDeleted, onConvert }) {
   const totals = computeTotals(doc.items, doc.tax_enabled ? doc.tax_rate : 0);
   const isQuote = doc.type === "quote";
   const statusOptions = isQuote ? ["draft", "sent", "accepted", "declined"] : ["draft", "sent", "paid"];
@@ -895,6 +1002,9 @@ function DocumentView({ company, doc, onBack, onLogout, onEdit, onChanged, onDel
                 Convert to invoice
               </button>
             )}
+            <button className="btn btn-sm" onClick={() => onEditDoc(doc)}>
+              Edit
+            </button>
           </div>
           <div className="doc-actions-left">
             <button className="btn btn-primary btn-sm" onClick={() => downloadPdf(doc, company)}>
@@ -1004,7 +1114,540 @@ function DocumentView({ company, doc, onBack, onLogout, onEdit, onChanged, onDel
               )}
             </div>
           )}
+          <div className="sheet-footer">Thank you for the opportunity to work with you.</div>
         </div>
+      </div>
+    </>
+  );
+}
+
+// ---------------- Reusable line-items editor (quote/invoice items, spares needed, spares used) ----------------
+function LineItemsEditor({ items, onChange }) {
+  function updateItem(idx, field, value) {
+    onChange(items.map((it, i) => (i === idx ? { ...it, [field]: value } : it)));
+  }
+  function addRow() {
+    onChange([...items, { desc: "", qty: 1, price: 0 }]);
+  }
+  function removeRow(idx) {
+    onChange(items.filter((_, i) => i !== idx));
+  }
+  return (
+    <>
+      <table className="items-table">
+        <thead>
+          <tr>
+            <th>Description</th>
+            <th>Qty</th>
+            <th>Price</th>
+            <th style={{ textAlign: "right" }}>Amount</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody>
+          {items.map((it, idx) => (
+            <tr key={idx}>
+              <td>
+                <input value={it.desc} placeholder="Description" onChange={(e) => updateItem(idx, "desc", e.target.value)} />
+              </td>
+              <td className="qty-col">
+                <input type="number" min="0" step="1" value={it.qty} onChange={(e) => updateItem(idx, "qty", e.target.value)} />
+              </td>
+              <td className="price-col">
+                <input type="number" min="0" step="0.01" value={it.price} onChange={(e) => updateItem(idx, "price", e.target.value)} />
+              </td>
+              <td className="amt-col">R{money((Number(it.qty) || 0) * (Number(it.price) || 0))}</td>
+              <td className="rm-col">
+                {items.length > 1 && (
+                  <button type="button" className="rm-btn" onClick={() => removeRow(idx)}>
+                    ×
+                  </button>
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      <button type="button" className="add-row-btn" onClick={addRow}>
+        + Add line
+      </button>
+    </>
+  );
+}
+
+// ---------------- Job card form (create/edit; used by technicians and admin) ----------------
+function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout, subtitle }) {
+  const isEditing = !!initial;
+  const [id] = useState(() => initial?.id || crypto.randomUUID());
+  const [clientName, setClientName] = useState(initial?.client_name || "");
+  const [siteAddress, setSiteAddress] = useState(initial?.site_address || "");
+  const [description, setDescription] = useState(initial?.description || "");
+  const [sparesNeeded, setSparesNeeded] = useState(initial?.spares_needed?.length ? initial.spares_needed : [{ desc: "", qty: 1, price: 0 }]);
+  const [sparesUsed, setSparesUsed] = useState(initial?.spares_used?.length ? initial.spares_used : [{ desc: "", qty: 1, price: 0 }]);
+  const [notes, setNotes] = useState(initial?.notes || "");
+  const [photos, setPhotos] = useState(initial?.photos || []);
+  const [uploading, setUploading] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  async function handleFiles(e) {
+    const files = Array.from(e.target.files || []);
+    if (files.length === 0) return;
+    setUploading(true);
+    const uploaded = [];
+    for (const file of files) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+      const path = `${company.id}/${id}/${Date.now()}-${safeName}`;
+      const { error } = await supabase.storage.from("job-photos").upload(path, file);
+      if (!error) {
+        const { data } = supabase.storage.from("job-photos").getPublicUrl(path);
+        uploaded.push({ path, url: data.publicUrl });
+      }
+    }
+    setPhotos((prev) => [...prev, ...uploaded]);
+    setUploading(false);
+    e.target.value = "";
+  }
+
+  async function removePhoto(idx) {
+    const photo = photos[idx];
+    setPhotos((prev) => prev.filter((_, i) => i !== idx));
+    if (photo?.path) {
+      try {
+        await supabase.storage.from("job-photos").remove([photo.path]);
+      } catch (e) {}
+    }
+  }
+
+  function cleanSpares(list) {
+    return list
+      .filter((it) => it.desc.trim() !== "" || Number(it.price) > 0)
+      .map((it) => ({ desc: it.desc, qty: Number(it.qty) || 0, price: Number(it.price) || 0 }));
+  }
+
+  async function save() {
+    if (!clientName.trim()) {
+      alert("Please add a client / site name before saving.");
+      return;
+    }
+    setSaving(true);
+    const payload = {
+      client_name: clientName.trim(),
+      site_address: siteAddress.trim(),
+      description: description.trim(),
+      spares_needed: cleanSpares(sparesNeeded),
+      spares_used: cleanSpares(sparesUsed),
+      photos,
+      notes: notes.trim()
+    };
+
+    let result;
+    if (isEditing) {
+      result = await supabase.from("job_cards").update(payload).eq("id", initial.id).select().single();
+    } else {
+      result = await supabase
+        .from("job_cards")
+        .insert({
+          id,
+          company_id: company.id,
+          technician_id: technician ? technician.id : null,
+          technician_name: technician ? technician.name : "",
+          status: "open",
+          ...payload
+        })
+        .select()
+        .single();
+    }
+    setSaving(false);
+    if (result.error) {
+      alert("Couldn't save: " + result.error.message);
+      return;
+    }
+    onSaved(result.data);
+  }
+
+  return (
+    <>
+      <Topbar company={company} onLogout={onLogout} subtitle={subtitle} />
+      <div className="container">
+        <div className="form-section">
+          <h3>Job details</h3>
+          <div className="field">
+            <label>Client / site name</label>
+            <input value={clientName} onChange={(e) => setClientName(e.target.value)} placeholder="e.g. Sonata Complex" />
+          </div>
+          <div className="field">
+            <label>Site address</label>
+            <textarea rows={2} value={siteAddress} onChange={(e) => setSiteAddress(e.target.value)} placeholder="Where the job is" />
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Job description</label>
+            <textarea rows={3} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="What needs to be done" />
+          </div>
+        </div>
+
+        <div className="form-section">
+          <h3>Photos</h3>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+            {photos.map((p, idx) => (
+              <div key={idx} style={{ position: "relative", width: 84, height: 84 }}>
+                <img
+                  src={p.url}
+                  alt=""
+                  style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }}
+                />
+                <button
+                  type="button"
+                  onClick={() => removePhoto(idx)}
+                  style={{
+                    position: "absolute",
+                    top: -8,
+                    right: -8,
+                    width: 22,
+                    height: 22,
+                    borderRadius: "50%",
+                    border: "1px solid var(--line)",
+                    background: "#fff",
+                    color: "var(--warn)",
+                    fontSize: 14,
+                    lineHeight: 1,
+                    cursor: "pointer"
+                  }}
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+          <input type="file" accept="image/*" multiple onChange={handleFiles} disabled={uploading} />
+          {uploading && <p className="hint">Uploading…</p>}
+        </div>
+
+        <div className="form-section">
+          <h3>Spares needed (for the quote)</h3>
+          <LineItemsEditor items={sparesNeeded} onChange={setSparesNeeded} />
+        </div>
+
+        <div className="form-section">
+          <h3>Spares used (for the invoice)</h3>
+          <LineItemsEditor items={sparesUsed} onChange={setSparesUsed} />
+        </div>
+
+        <div className="form-section">
+          <h3>Notes</h3>
+          <textarea rows={2} value={notes} onChange={(e) => setNotes(e.target.value)} placeholder="Optional" style={{ width: "100%", padding: "10px 12px", border: "1px solid var(--line-strong)", borderRadius: 5, background: "var(--paper)" }} />
+        </div>
+
+        <div className="form-actions">
+          <button className="btn" onClick={onCancel}>
+            Cancel
+          </button>
+          <button className="btn btn-primary" disabled={saving || uploading} onClick={save}>
+            {saving ? "Saving…" : "Save job card"}
+          </button>
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ---------------- Job card list ----------------
+function JobCardList({ company, jobCards, isAdmin, onLogout, onEdit, onNew, onOpen, onSection }) {
+  return (
+    <>
+      <Topbar company={company} onLogout={onLogout} onEdit={isAdmin ? onEdit : undefined} />
+      <div className="container">
+        {isAdmin && <AdminTabs active="jobcards" onChange={onSection} />}
+        <div className="toolbar">
+          <div />
+          <button className="btn btn-primary" onClick={onNew}>
+            + New job card
+          </button>
+        </div>
+        {jobCards.length === 0 ? (
+          <div className="empty-state">
+            <div className="big">No job cards yet</div>
+            <div>Create the first one for {company.name}.</div>
+          </div>
+        ) : (
+          <div className="doclist-wrap">
+            <table className="doclist">
+              <thead>
+                <tr>
+                  <th>Client / site</th>
+                  <th>Technician</th>
+                  <th>Date</th>
+                  <th>Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {jobCards
+                  .slice()
+                  .sort((a, b) => new Date(b.created_at) - new Date(a.created_at))
+                  .map((jc) => (
+                    <tr key={jc.id} className="row" onClick={() => onOpen(jc)}>
+                      <td>{jc.client_name}</td>
+                      <td>{jc.technician_name || "—"}</td>
+                      <td>{fmtDate(jc.created_at ? jc.created_at.slice(0, 10) : "")}</td>
+                      <td>
+                        <span className={`status-pill status-${jc.status === "open" ? "draft" : jc.status === "quoted" ? "sent" : jc.status === "invoiced" ? "paid" : "draft"}`}>
+                          {jc.status}
+                        </span>
+                      </td>
+                      <td>{jc.photos?.length ? `${jc.photos.length} photo${jc.photos.length > 1 ? "s" : ""}` : ""}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+// ---------------- Job card detail view ----------------
+function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEditCard, onDeleted, onConvert, subtitle }) {
+  async function del() {
+    if (!confirm("Delete this job card? This can't be undone.")) return;
+    if (jobCard.photos?.length) {
+      try {
+        await supabase.storage.from("job-photos").remove(jobCard.photos.map((p) => p.path));
+      } catch (e) {}
+    }
+    const { error } = await supabase.from("job_cards").delete().eq("id", jobCard.id);
+    if (!error) onDeleted(jobCard.id);
+  }
+
+  return (
+    <>
+      <Topbar company={company} onLogout={onLogout} onEdit={isAdmin ? onEdit : undefined} subtitle={subtitle} />
+      <div className="container">
+        <div className="doc-actions">
+          <div className="doc-actions-left">
+            <button className="btn btn-quiet" onClick={onBack}>
+              ← Back
+            </button>
+            <button className="btn btn-sm" onClick={() => onEditCard(jobCard)}>
+              Edit
+            </button>
+            {isAdmin && jobCard.spares_needed?.length > 0 && (
+              <button className="btn btn-sm" onClick={() => onConvert(jobCard, "quote")}>
+                Create quote from spares needed
+              </button>
+            )}
+            {isAdmin && jobCard.spares_used?.length > 0 && (
+              <button className="btn btn-sm" onClick={() => onConvert(jobCard, "invoice")}>
+                Create invoice from spares used
+              </button>
+            )}
+          </div>
+          <div className="doc-actions-left">
+            <button className="btn btn-sm btn-danger" onClick={del}>
+              Delete
+            </button>
+          </div>
+        </div>
+
+        <div className="sheet">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: 22 }}>
+            <div>
+              <p className="sheet-co-name">{jobCard.client_name}</p>
+              <p className="sheet-co-addr">{jobCard.site_address}</p>
+            </div>
+            <span className={`status-pill status-${jobCard.status === "open" ? "draft" : jobCard.status === "quoted" ? "sent" : jobCard.status === "invoiced" ? "paid" : "draft"}`}>
+              {jobCard.status}
+            </span>
+          </div>
+
+          {jobCard.description && (
+            <div className="sheet-billto" style={{ marginBottom: 20 }}>
+              <div className="label">Description</div>
+              <div className="addr">{jobCard.description}</div>
+            </div>
+          )}
+
+          <div style={{ fontSize: 12.5, color: "var(--ink-soft)", marginBottom: 22 }}>
+            Technician: <b style={{ color: "var(--ink)" }}>{jobCard.technician_name || "—"}</b> · Logged: {fmtDate(jobCard.created_at ? jobCard.created_at.slice(0, 10) : "")}
+            {jobCard.quote_id && <> · Quote created</>}
+            {jobCard.invoice_id && <> · Invoice created</>}
+          </div>
+
+          {jobCard.photos?.length > 0 && (
+            <div style={{ marginBottom: 24 }}>
+              <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4, color: "var(--ink-soft)", fontWeight: 600, marginBottom: 8 }}>
+                Photos
+              </div>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
+                {jobCard.photos.map((p, idx) => (
+                  <a key={idx} href={p.url} target="_blank" rel="noreferrer">
+                    <img src={p.url} alt="" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {jobCard.spares_needed?.length > 0 && (
+            <div style={{ marginBottom: 22 }}>
+              <h3 style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--ink-soft)", marginBottom: 10 }}>Spares needed</h3>
+              <table className="sheet-items">
+                <thead>
+                  <tr>
+                    <th>Description</th>
+                    <th className="num">Qty</th>
+                    <th className="num">Price</th>
+                    <th className="num">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobCard.spares_needed.map((it, idx) => (
+                    <tr key={idx}>
+                      <td>{it.desc}</td>
+                      <td className="num">{it.qty}</td>
+                      <td className="num">R{money(it.price)}</td>
+                      <td className="num">R{money(it.qty * it.price)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {jobCard.spares_used?.length > 0 && (
+            <div style={{ marginBottom: 22 }}>
+              <h3 style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--ink-soft)", marginBottom: 10 }}>Spares used</h3>
+              <table className="sheet-items">
+                <thead>
+                  <tr>
+                    <th>Description</th>
+                    <th className="num">Qty</th>
+                    <th className="num">Price</th>
+                    <th className="num">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {jobCard.spares_used.map((it, idx) => (
+                    <tr key={idx}>
+                      <td>{it.desc}</td>
+                      <td className="num">{it.qty}</td>
+                      <td className="num">R{money(it.price)}</td>
+                      <td className="num">R{money(it.qty * it.price)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+
+          {jobCard.notes && (
+            <div className="sheet-notes">
+              <b>Notes:</b> {jobCard.notes}
+            </div>
+          )}
+        </div>
+      </div>
+    </>
+  );
+}
+
+// ---------------- Technician management (admin only) ----------------
+function TechnicianManager({ company, technicians, onLogout, onEdit, onSection, onChanged }) {
+  const [name, setName] = useState("");
+  const [username, setUsername] = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const [saving, setSaving] = useState(false);
+
+  const companyTechs = technicians.filter((t) => t.company_id === company.id);
+
+  async function addTechnician() {
+    if (!name.trim() || !username.trim() || !password) {
+      setError("Name, username and password are required.");
+      return;
+    }
+    setError("");
+    setSaving(true);
+    const { error: insertError } = await supabase.from("technicians").insert({
+      company_id: company.id,
+      name: name.trim(),
+      username: username.trim(),
+      password
+    });
+    setSaving(false);
+    if (insertError) {
+      setError(insertError.message.includes("duplicate") ? "That username is already taken." : "Couldn't save: " + insertError.message);
+      return;
+    }
+    setName("");
+    setUsername("");
+    setPassword("");
+    onChanged();
+  }
+
+  async function removeTechnician(id) {
+    if (!confirm("Remove this technician's login?")) return;
+    const { error } = await supabase.from("technicians").delete().eq("id", id);
+    if (!error) onChanged();
+  }
+
+  return (
+    <>
+      <Topbar company={company} onLogout={onLogout} onEdit={onEdit} />
+      <div className="container">
+        <AdminTabs active="technicians" onChange={onSection} />
+
+        <div className="form-section" style={{ maxWidth: 440 }}>
+          <h3>Add a technician</h3>
+          <div className="field">
+            <label>Name</label>
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Kabir Singh" />
+          </div>
+          <div className="field">
+            <label>Username</label>
+            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. kabir-tech" />
+          </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Password</label>
+            <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
+          </div>
+          {error && <div className="error-msg" style={{ marginTop: 12 }}>{error}</div>}
+          <button className="btn btn-primary" style={{ marginTop: 16 }} disabled={saving} onClick={addTechnician}>
+            {saving ? "Adding…" : "Add technician"}
+          </button>
+        </div>
+
+        {companyTechs.length === 0 ? (
+          <div className="empty-state">
+            <div className="big">No technicians yet</div>
+            <div>Add one above to give them job-card-only access.</div>
+          </div>
+        ) : (
+          <div className="doclist-wrap">
+            <table className="doclist">
+              <thead>
+                <tr>
+                  <th>Name</th>
+                  <th>Username</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                {companyTechs.map((t) => (
+                  <tr key={t.id}>
+                    <td>{t.name}</td>
+                    <td className="num-cell">{t.username}</td>
+                    <td style={{ textAlign: "right" }}>
+                      <button className="btn btn-sm btn-danger" onClick={() => removeTechnician(t.id)}>
+                        Remove
+                      </button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
       </div>
     </>
   );
@@ -1014,16 +1657,21 @@ function DocumentView({ company, doc, onBack, onLogout, onEdit, onChanged, onDel
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [companies, setCompanies] = useState([]);
-  const [session, setSession] = useState(null); // logged-in company object
+  const [technicians, setTechnicians] = useState([]);
+  const [session, setSession] = useState(null); // { role: 'admin'|'technician', company, technician? }
   const [docs, setDocs] = useState([]);
-  const [view, setView] = useState("login"); // login | settings | newdoc | viewdoc | dashboard
+  const [jobCards, setJobCards] = useState([]);
+  const [view, setView] = useState("login");
   const [currentDoc, setCurrentDoc] = useState(null);
   const [formInitial, setFormInitial] = useState(null);
+  const [currentJobCard, setCurrentJobCard] = useState(null);
+  const [jobCardFormInitial, setJobCardFormInitial] = useState(null);
   const [filter, setFilter] = useState("all");
   const [loadError, setLoadError] = useState("");
 
   useEffect(() => {
     refreshCompanies();
+    refreshTechnicians();
   }, []);
 
   async function refreshCompanies() {
@@ -1038,22 +1686,63 @@ export default function App() {
     setLoading(false);
   }
 
+  async function refreshTechnicians() {
+    const { data } = await supabase.from("technicians").select("*");
+    setTechnicians(data || []);
+  }
+
   async function loadDocs(companyId) {
     const { data, error } = await supabase.from("documents").select("*").eq("company_id", companyId);
     if (!error) setDocs(data || []);
   }
 
-  async function handleLoggedIn(company) {
-    setSession(company);
-    await loadDocs(company.id);
-    setFilter("all");
-    setView("dashboard");
+  async function loadJobCards(companyId) {
+    const { data, error } = await supabase.from("job_cards").select("*").eq("company_id", companyId);
+    if (!error) setJobCards(data || []);
+  }
+
+  async function handleLoggedIn(sessionObj) {
+    setSession(sessionObj);
+    await loadJobCards(sessionObj.company.id);
+    if (sessionObj.role === "admin") {
+      await loadDocs(sessionObj.company.id);
+      setFilter("all");
+      setView("dashboard");
+    } else {
+      setView("jobcards");
+    }
   }
 
   function handleLogout() {
     setSession(null);
     setDocs([]);
+    setJobCards([]);
     setView("login");
+  }
+
+  const company = session?.company;
+  const isAdmin = session?.role === "admin";
+  const roleSubtitle = session?.role === "technician" ? `${session.technician.name} (technician)` : null;
+
+  function goSection(key) {
+    if (key === "documents") setView("dashboard");
+    else setView(key);
+  }
+
+  function docToFormInitial(d) {
+    return {
+      type: d.type,
+      number: d.number,
+      editingId: d.id,
+      client: { name: d.client_name, address: d.client_address, email: d.client_email },
+      issueDate: d.issue_date,
+      dueDate: d.due_date,
+      items: d.items.map((it) => ({ desc: it.desc, qty: it.qty, price: it.price })),
+      taxEnabled: d.tax_enabled,
+      taxRate: d.tax_rate,
+      notes: d.notes,
+      terms: d.terms
+    };
   }
 
   function openNewDoc(type, prefill) {
@@ -1070,6 +1759,11 @@ export default function App() {
       }
     );
     setView("newdoc");
+  }
+
+  function openJobCardForm(prefill) {
+    setJobCardFormInitial(prefill || null);
+    setView("jobcard-new");
   }
 
   if (loading) {
@@ -1106,17 +1800,21 @@ export default function App() {
   }
 
   if (!session) {
-    return <Login companies={companies} onLoggedIn={handleLoggedIn} />;
+    return <Login companies={companies} technicians={technicians} onLoggedIn={handleLoggedIn} />;
   }
 
-  if (view === "settings") {
+  // Technicians can only ever reach job-card screens, regardless of what
+  // view state may have been left over from before.
+  const effectiveView = isAdmin ? view : view.startsWith("jobcard") ? view : "jobcards";
+
+  if (effectiveView === "settings" && isAdmin) {
     return (
       <Settings
-        company={session}
+        company={company}
         onLogout={handleLogout}
         onCancel={() => setView("dashboard")}
         onSaved={(updated) => {
-          setSession(updated);
+          setSession({ ...session, company: updated });
           setCompanies((prev) => prev.map((c) => (c.id === updated.id ? updated : c)));
           setView("dashboard");
         }}
@@ -1124,37 +1822,70 @@ export default function App() {
     );
   }
 
-  if (view === "newdoc") {
+  if (effectiveView === "technicians" && isAdmin) {
+    return (
+      <TechnicianManager
+        company={company}
+        technicians={technicians}
+        onLogout={handleLogout}
+        onEdit={() => setView("settings")}
+        onSection={goSection}
+        onChanged={refreshTechnicians}
+      />
+    );
+  }
+
+  if (effectiveView === "newdoc" && isAdmin) {
     return (
       <DocumentForm
-        company={session}
+        company={company}
         initial={formInitial}
         onLogout={handleLogout}
         onEdit={() => setView("settings")}
-        onCancel={() => setView("dashboard")}
-        onSaved={(newDoc, updatedCompany) => {
+        onCancel={() => setView(formInitial.editingId ? "viewdoc" : "dashboard")}
+        onSaved={async (newDoc, updatedCompany) => {
           setDocs((prev) => {
-            const withoutOld = prev.filter((d) => d.id !== formInitial.convertedFromId);
             const updated = prev.map((d) => (d.id === formInitial.convertedFromId ? { ...d, status: "converted" } : d));
             return [...updated, newDoc];
           });
-          setSession(updatedCompany);
+          setSession({ ...session, company: updatedCompany });
           setCompanies((prev) => prev.map((c) => (c.id === updatedCompany.id ? updatedCompany : c)));
+
+          if (formInitial.linkedJobCardId) {
+            const statusField = formInitial.linkedJobCardField === "quote_id" ? "quoted" : "invoiced";
+            const { data: updatedCard } = await supabase
+              .from("job_cards")
+              .update({ [formInitial.linkedJobCardField]: newDoc.id, status: statusField })
+              .eq("id", formInitial.linkedJobCardId)
+              .select()
+              .single();
+            if (updatedCard) setJobCards((prev) => prev.map((jc) => (jc.id === updatedCard.id ? updatedCard : jc)));
+          }
+
           setCurrentDoc(newDoc);
           setFilter("all");
+          setView("viewdoc");
+        }}
+        onUpdated={(updated) => {
+          setDocs((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
+          setCurrentDoc(updated);
           setView("viewdoc");
         }}
       />
     );
   }
 
-  if (view === "viewdoc" && currentDoc) {
+  if (effectiveView === "viewdoc" && currentDoc && isAdmin) {
     return (
       <DocumentView
-        company={session}
+        company={company}
         doc={currentDoc}
         onLogout={handleLogout}
         onEdit={() => setView("settings")}
+        onEditDoc={(d) => {
+          setFormInitial(docToFormInitial(d));
+          setView("newdoc");
+        }}
         onBack={() => setView("dashboard")}
         onChanged={(updated) => {
           setDocs((prev) => prev.map((d) => (d.id === updated.id ? updated : d)));
@@ -1182,14 +1913,88 @@ export default function App() {
     );
   }
 
+  if (effectiveView === "jobcard-new") {
+    return (
+      <JobCardForm
+        company={company}
+        technician={session.role === "technician" ? session.technician : null}
+        initial={jobCardFormInitial}
+        subtitle={roleSubtitle}
+        onLogout={handleLogout}
+        onCancel={() => setView(jobCardFormInitial ? "jobcard-view" : "jobcards")}
+        onSaved={(saved) => {
+          setJobCards((prev) => {
+            const exists = prev.some((jc) => jc.id === saved.id);
+            return exists ? prev.map((jc) => (jc.id === saved.id ? saved : jc)) : [...prev, saved];
+          });
+          setCurrentJobCard(saved);
+          setView("jobcard-view");
+        }}
+      />
+    );
+  }
+
+  if (effectiveView === "jobcard-view" && currentJobCard) {
+    return (
+      <JobCardView
+        company={company}
+        jobCard={currentJobCard}
+        isAdmin={isAdmin}
+        subtitle={roleSubtitle}
+        onLogout={handleLogout}
+        onEdit={() => setView("settings")}
+        onBack={() => setView("jobcards")}
+        onEditCard={(jc) => openJobCardForm(jc)}
+        onDeleted={(id) => {
+          setJobCards((prev) => prev.filter((jc) => jc.id !== id));
+          setView("jobcards");
+        }}
+        onConvert={(jobCard, type) => {
+          const spares = type === "quote" ? jobCard.spares_needed : jobCard.spares_used;
+          openNewDoc(type, {
+            type,
+            client: { name: jobCard.client_name, address: jobCard.site_address, email: "" },
+            issueDate: todayISO(),
+            dueDate: plusDays(todayISO(), 14),
+            items: spares.map((it) => ({ desc: it.desc, qty: it.qty, price: it.price })),
+            taxRate: 0,
+            notes: jobCard.description || "",
+            terms: type === "quote" ? "This quote is valid for 30 days." : "Payment due within 14 days.",
+            linkedJobCardId: jobCard.id,
+            linkedJobCardField: type === "quote" ? "quote_id" : "invoice_id"
+          });
+        }}
+      />
+    );
+  }
+
+  if (effectiveView === "jobcards") {
+    return (
+      <JobCardList
+        company={company}
+        jobCards={jobCards}
+        isAdmin={isAdmin}
+        onLogout={handleLogout}
+        onEdit={() => setView("settings")}
+        onSection={goSection}
+        onNew={() => openJobCardForm(null)}
+        onOpen={(jc) => {
+          setCurrentJobCard(jc);
+          setView("jobcard-view");
+        }}
+      />
+    );
+  }
+
   return (
     <Dashboard
-      company={session}
+      company={company}
       docs={docs}
       filter={filter}
       setFilter={setFilter}
       onLogout={handleLogout}
       onEdit={() => setView("settings")}
+      onSection={goSection}
       onNew={() => openNewDoc("quote")}
       onOpen={(d) => {
         setCurrentDoc(d);

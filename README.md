@@ -41,7 +41,8 @@ Any time you want to make a change: update the files in the GitHub repo (edit di
 
 ## Notes
 
-- **Login is simple, not bulletproof.** See the security note at the top of `supabase-schema.sql` — the two-company separation is enforced by the app's UI, not by real authentication. Fine for keeping the two companies' day-to-day work apart; don't store highly sensitive data in it.
-- **Adding a logo later:** once logged in, use "Edit logo" in the top bar.
+- **Login is simple, not bulletproof.** See the security note at the top of `supabase-schema.sql` — access separation (companies, and technicians vs admin) is enforced by the app's UI, not by real authentication. Fine for keeping people in their own lane day-to-day; don't store highly sensitive data in it.
+- **Adding a logo later:** once logged in as admin, use "Edit logo" in the top bar.
 - **Banking details:** set once per company under "Edit logo" (the same settings screen) — separate fields for Account Holder, Bank Name, Account Type, Branch Code, and Account Number, shown automatically on every quote and invoice.
+- **Job cards & technicians:** from the admin dashboard, the "Technicians" tab lets you create individual logins for each technician. A technician can only reach job cards — never quotes, invoices, or company settings. On a job card, "Spares needed" becomes a quote's line items and "Spares used" becomes an invoice's line items, with one click from the job card's page (admin only). Photos are stored in Supabase Storage (a `job-photos` bucket, created automatically by the schema SQL) rather than the database.
 

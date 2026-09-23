@@ -84,3 +84,68 @@ alter table companies add column if not exists bank_name text default '';
 alter table companies add column if not exists bank_account_type text default '';
 alter table companies add column if not exists bank_branch_code text default '';
 alter table companies add column if not exists bank_account_number text default '';
+
+-- ---------------------------------------------------------------------
+-- MIGRATION: Job card system
+-- Technicians get their own login, scoped to one company, and can only
+-- reach job cards — never the quotes/invoices screens (that's enforced
+-- in the app's code, not the database, same as the rest of this app's
+-- login model).
+-- ---------------------------------------------------------------------
+create table if not exists technicians (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references companies(id) on delete cascade,
+  name text not null,
+  username text not null unique,
+  password text not null,
+  created_at timestamptz not null default now()
+);
+
+create table if not exists job_cards (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references companies(id) on delete cascade,
+  technician_id uuid references technicians(id) on delete set null,
+  technician_name text default '',
+  client_name text not null,
+  site_address text default '',
+  description text default '',
+  status text not null default 'open', -- open, quoted, invoiced, closed
+  spares_needed jsonb not null default '[]',
+  spares_used jsonb not null default '[]',
+  photos jsonb not null default '[]',
+  quote_id uuid references documents(id) on delete set null,
+  invoice_id uuid references documents(id) on delete set null,
+  notes text default '',
+  created_at timestamptz not null default now()
+);
+
+alter table technicians enable row level security;
+alter table job_cards enable row level security;
+
+create policy "public read technicians" on technicians for select using (true);
+create policy "public insert technicians" on technicians for insert with check (true);
+create policy "public update technicians" on technicians for update using (true);
+create policy "public delete technicians" on technicians for delete using (true);
+
+create policy "public read job_cards" on job_cards for select using (true);
+create policy "public insert job_cards" on job_cards for insert with check (true);
+create policy "public update job_cards" on job_cards for update using (true);
+create policy "public delete job_cards" on job_cards for delete using (true);
+
+grant usage on schema public to anon, authenticated;
+grant select, insert, update, delete on technicians to anon, authenticated;
+grant select, insert, update, delete on job_cards to anon, authenticated;
+
+-- Storage bucket for job card photos (public read, so photos display
+-- directly by URL; anyone with the anon key can upload/read, matching
+-- this app's existing "simple, not bulletproof" security model).
+insert into storage.buckets (id, name, public)
+values ('job-photos', 'job-photos', true)
+on conflict (id) do nothing;
+
+create policy "public upload job photos" on storage.objects
+  for insert with check (bucket_id = 'job-photos');
+create policy "public read job photos" on storage.objects
+  for select using (bucket_id = 'job-photos');
+create policy "public delete job photos" on storage.objects
+  for delete using (bucket_id = 'job-photos');
