@@ -261,6 +261,156 @@ function downloadPdf(doc, company) {
   }
 }
 
+// ---------------- Job card PDF export (spares used, no prices) ----------------
+function downloadJobCardPdf(jobCard, company) {
+  const ACCENT = [30, 58, 95];
+  const GOLD = [156, 122, 46];
+  const INK = [20, 26, 36];
+  const INK_SOFT = [91, 100, 114];
+  const LINE = [219, 223, 217];
+  const PAPER_ALT = [228, 231, 225];
+
+  try {
+    const pdf = new jsPDF({ unit: "pt", format: "a4" });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const marginX = 48;
+    const contentW = pageW - marginX * 2;
+    const loggedDate = jobCard.created_at ? jobCard.created_at.slice(0, 10) : "";
+    const ref = "JC-" + String(jobCard.id || "").slice(0, 8).toUpperCase();
+
+    pdf.setFillColor(...ACCENT);
+    pdf.rect(0, 0, pageW * 0.82, 7, "F");
+    pdf.setFillColor(...GOLD);
+    pdf.rect(pageW * 0.82, 0, pageW * 0.18, 7, "F");
+
+    let y = 46;
+    let nameY = y;
+    if (company.logo) {
+      try {
+        const fmt = company.logo.includes("image/png") ? "PNG" : "JPEG";
+        pdf.addImage(company.logo, fmt, marginX, y - 8, 42, 42, undefined, "FAST");
+        nameY = y + 50;
+      } catch (e) {}
+    }
+
+    pdf.setFont("times", "bold");
+    pdf.setFontSize(16);
+    pdf.setTextColor(...INK);
+    pdf.text(company.name || "", marginX, nameY);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9.5);
+    pdf.setTextColor(...INK_SOFT);
+    const addrLines = pdf.splitTextToSize(
+      [company.address, company.email, company.phone].filter(Boolean).join("\n"),
+      260
+    );
+    pdf.text(addrLines, marginX, nameY + 18);
+
+    pdf.setFont("times", "bold");
+    pdf.setFontSize(24);
+    pdf.setTextColor(...ACCENT);
+    pdf.text("Job Card", pageW - marginX, y + 6, { align: "right" });
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9.5);
+    pdf.setTextColor(...INK_SOFT);
+    pdf.text(`Ref: ${ref}`, pageW - marginX, y + 26, { align: "right" });
+    pdf.text(`Date: ${fmtDate(loggedDate)}`, pageW - marginX, y + 40, { align: "right" });
+    pdf.text(`Technician: ${jobCard.technician_name || "—"}`, pageW - marginX, y + 54, { align: "right" });
+
+    y = Math.max(nameY + 18 + addrLines.length * 11, y + 74) + 26;
+
+    // Client / site block
+    const siteLines = jobCard.site_address ? pdf.splitTextToSize(jobCard.site_address, contentW - 28) : [];
+    const boxH = 40 + siteLines.length * 11;
+    pdf.setFillColor(...PAPER_ALT);
+    pdf.roundedRect(marginX, y - 16, contentW, boxH, 4, 4, "F");
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(...INK_SOFT);
+    pdf.text("CLIENT / SITE", marginX + 14, y);
+    pdf.setFontSize(11.5);
+    pdf.setTextColor(...INK);
+    pdf.text(jobCard.client_name || "", marginX + 14, y + 16);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9.5);
+    pdf.setTextColor(...INK_SOFT);
+    if (siteLines.length) pdf.text(siteLines, marginX + 14, y + 30);
+    y += boxH + 14;
+
+    function section(title, text) {
+      if (!text) return;
+      const lines = pdf.splitTextToSize(text, contentW);
+      if (y + 30 + lines.length * 12 > pageH - 60) {
+        pdf.addPage();
+        y = 60;
+      }
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(9);
+      pdf.setTextColor(...INK);
+      pdf.text(title, marginX, y);
+      pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(...INK_SOFT);
+      pdf.text(lines, marginX, y + 14);
+      y += 14 + lines.length * 11 + 16;
+    }
+
+    section("Job description", jobCard.description);
+
+    // Spares used — description and quantity only, no prices
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(9);
+    pdf.setTextColor(...INK);
+    pdf.text("Spares used", marginX, y);
+    y += 8;
+    const used = jobCard.spares_used || [];
+    pdf.autoTable({
+      startY: y,
+      margin: { left: marginX, right: marginX },
+      head: [["Description", "Qty"]],
+      body: used.length ? used.map((it) => [it.desc, String(it.qty)]) : [["No spares recorded", ""]],
+      theme: "plain",
+      styles: { font: "helvetica", fontSize: 9.5, textColor: INK, cellPadding: { top: 8, bottom: 8, left: 10, right: 10 } },
+      headStyles: { fontStyle: "bold", fontSize: 8.5, textColor: [255, 255, 255], fillColor: ACCENT },
+      alternateRowStyles: { fillColor: PAPER_ALT },
+      columnStyles: { 1: { halign: "right", cellWidth: 70 } },
+      didParseCell: (data) => {
+        if (data.section === "body") {
+          data.cell.styles.lineColor = LINE;
+          data.cell.styles.lineWidth = { bottom: 0.5 };
+        }
+      }
+    });
+    y = pdf.lastAutoTable.finalY + 26;
+
+    section("Notes", jobCard.notes);
+
+    // Sign-off lines
+    if (y + 70 > pageH - 40) {
+      pdf.addPage();
+      y = 60;
+    }
+    y = Math.max(y + 20, pageH - 120);
+    const colW = (contentW - 40) / 2;
+    pdf.setDrawColor(...LINE);
+    pdf.setLineWidth(0.75);
+    [["Technician signature", marginX], ["Client signature", marginX + colW + 40]].forEach(([label, x]) => {
+      pdf.line(x, y, x + colW, y);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8.5);
+      pdf.setTextColor(...INK_SOFT);
+      pdf.text(label, x, y + 13);
+      pdf.text("Date:", x, y + 27);
+    });
+
+    const safeClient = (jobCard.client_name || "job").replace(/[^a-zA-Z0-9_-]+/g, "_");
+    pdf.save(`JobCard_${safeClient}_${loggedDate || todayISO()}.pdf`);
+  } catch (err) {
+    console.error(err);
+    alert("Couldn't generate the job card PDF. Please try again.");
+  }
+}
+
 // ---------------- Topbar ----------------
 function Topbar({ company, onLogout, onEdit, subtitle }) {
   return (
@@ -428,6 +578,7 @@ function Setup({ which, existingUsernames, onCreated }) {
 // ---------------- Login ----------------
 function Login({ companies, technicians, onLoggedIn }) {
   const [picked, setPicked] = useState(null);
+  const [role, setRole] = useState("admin");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -460,16 +611,19 @@ function Login({ companies, technicians, onLoggedIn }) {
   }
 
   function submit() {
-    if (username === picked.username && password === picked.password) {
-      onLoggedIn({ role: "admin", company: picked });
-      return;
-    }
-    const tech = technicians.find(
-      (t) => t.company_id === picked.id && t.username === username && t.password === password
-    );
-    if (tech) {
-      onLoggedIn({ role: "technician", company: picked, technician: tech });
-      return;
+    if (role === "admin") {
+      if (username === picked.username && password === picked.password) {
+        onLoggedIn({ role: "admin", company: picked });
+        return;
+      }
+    } else {
+      const tech = technicians.find(
+        (t) => t.company_id === picked.id && t.username === username && t.password === password
+      );
+      if (tech) {
+        onLoggedIn({ role: "technician", company: picked, technician: tech });
+        return;
+      }
     }
     setError("Incorrect username or password.");
   }
@@ -480,7 +634,20 @@ function Login({ companies, technicians, onLoggedIn }) {
       <div className="center-screen">
         <div className="panel">
           <h1>{picked.name}</h1>
-          <p className="sub">Sign in as the company admin, or as a technician.</p>
+          <p className="sub">Choose how you're signing in.</p>
+          <div className="field">
+            <label>Sign in as</label>
+            <select
+              value={role}
+              onChange={(e) => {
+                setRole(e.target.value);
+                setError("");
+              }}
+            >
+              <option value="admin">Admin</option>
+              <option value="technician">Technician</option>
+            </select>
+          </div>
           <div className="field">
             <label>Username</label>
             <input value={username} onChange={(e) => setUsername(e.target.value)} />
@@ -498,7 +665,14 @@ function Login({ companies, technicians, onLoggedIn }) {
           <button className="btn btn-primary" style={{ width: "100%" }} onClick={submit}>
             Sign in
           </button>
-          <button className="btn btn-quiet" style={{ width: "100%", marginTop: 8 }} onClick={() => setPicked(null)}>
+          <button
+            className="btn btn-quiet"
+            style={{ width: "100%", marginTop: 8 }}
+            onClick={() => {
+              setPicked(null);
+              setError("");
+            }}
+          >
             ← Choose a different company
           </button>
         </div>
@@ -1406,13 +1580,119 @@ function JobCardList({ company, jobCards, isAdmin, onLogout, onEdit, onNew, onOp
   );
 }
 
+// ---------------- Receipts for spares bought (admin only) ----------------
+function ReceiptsPanel({ company, jobCard, onChanged }) {
+  const [busy, setBusy] = useState(false);
+  const receipts = jobCard.receipts || [];
+  const cameraRef = useRef(null);
+  const fileRef = useRef(null);
+
+  async function saveList(list) {
+    const { data, error } = await supabase.from("job_cards").update({ receipts: list }).eq("id", jobCard.id).select().single();
+    if (error) {
+      alert("Couldn't save receipts: " + error.message);
+      return false;
+    }
+    onChanged(data);
+    return true;
+  }
+
+  async function handleFiles(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (!files.length) return;
+    setBusy(true);
+    const added = [];
+    for (const file of files) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "receipt.jpg";
+      const path = `${company.id}/${jobCard.id}/receipts/${Date.now()}-${safeName}`;
+      const { error } = await supabase.storage.from("job-photos").upload(path, file);
+      if (error) {
+        alert("Upload failed for " + file.name + ": " + error.message);
+        continue;
+      }
+      const { data } = supabase.storage.from("job-photos").getPublicUrl(path);
+      added.push({ path, url: data.publicUrl, name: file.name, type: file.type, uploaded_at: new Date().toISOString() });
+    }
+    if (added.length) await saveList([...receipts, ...added]);
+    setBusy(false);
+  }
+
+  async function remove(idx) {
+    if (!confirm("Remove this receipt?")) return;
+    const r = receipts[idx];
+    setBusy(true);
+    const ok = await saveList(receipts.filter((_, i) => i !== idx));
+    if (ok && r?.path) {
+      try {
+        await supabase.storage.from("job-photos").remove([r.path]);
+      } catch (e) {}
+    }
+    setBusy(false);
+  }
+
+  return (
+    <div className="sheet" style={{ marginTop: 18 }}>
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+        <div>
+          <h3 style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--ink-soft)", margin: 0 }}>Receipts for spares bought</h3>
+          <p className="hint" style={{ margin: "4px 0 0" }}>Admin only — not shown to technicians or on the job card PDF.</p>
+        </div>
+        <div style={{ display: "flex", gap: 8 }}>
+          <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => cameraRef.current?.click()}>
+            Scan receipt
+          </button>
+          <button className="btn btn-sm" disabled={busy} onClick={() => fileRef.current?.click()}>
+            Upload file
+          </button>
+        </div>
+      </div>
+      <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={handleFiles} />
+      <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple style={{ display: "none" }} onChange={handleFiles} />
+      {busy && <p className="hint">Working…</p>}
+      {receipts.length === 0 ? (
+        <p className="hint">No receipts yet.</p>
+      ) : (
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+          {receipts.map((r, idx) => {
+            const isPdf = r.type === "application/pdf" || /\.pdf$/i.test(r.name || r.path);
+            return (
+              <div key={r.path || idx} style={{ position: "relative", width: 100 }}>
+                <a href={r.url} target="_blank" rel="noreferrer">
+                  {isPdf ? (
+                    <div style={{ width: 100, height: 100, borderRadius: 6, border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, color: "var(--ink-soft)", background: "var(--paper-alt)" }}>
+                      PDF
+                    </div>
+                  ) : (
+                    <img src={r.url} alt="Receipt" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />
+                  )}
+                </a>
+                <div className="hint" style={{ fontSize: 11 }}>{r.uploaded_at ? fmtDate(r.uploaded_at.slice(0, 10)) : ""}</div>
+                <button
+                  type="button"
+                  onClick={() => remove(idx)}
+                  disabled={busy}
+                  style={{ position: "absolute", top: -8, right: -8, width: 22, height: 22, borderRadius: "50%", border: "1px solid var(--line)", background: "#fff", color: "var(--warn)", fontSize: 14, lineHeight: 1, cursor: "pointer" }}
+                >
+                  ×
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ---------------- Job card detail view ----------------
-function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEditCard, onDeleted, onConvert, subtitle }) {
+function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEditCard, onDeleted, onConvert, onChanged, subtitle }) {
   async function del() {
     if (!confirm("Delete this job card? This can't be undone.")) return;
-    if (jobCard.photos?.length) {
+    const filePaths = [...(jobCard.photos || []), ...(jobCard.receipts || [])].map((p) => p.path).filter(Boolean);
+    if (filePaths.length) {
       try {
-        await supabase.storage.from("job-photos").remove(jobCard.photos.map((p) => p.path));
+        await supabase.storage.from("job-photos").remove(filePaths);
       } catch (e) {}
     }
     const { error } = await supabase.from("job_cards").delete().eq("id", jobCard.id);
@@ -1430,6 +1710,9 @@ function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEd
             </button>
             <button className="btn btn-sm" onClick={() => onEditCard(jobCard)}>
               Edit
+            </button>
+            <button className="btn btn-sm" onClick={() => downloadJobCardPdf(jobCard, company)}>
+              Download PDF
             </button>
             {isAdmin && jobCard.spares_needed?.length > 0 && (
               <button className="btn btn-sm" onClick={() => onConvert(jobCard, "quote")}>
@@ -1546,6 +1829,8 @@ function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEd
             </div>
           )}
         </div>
+
+        {isAdmin && <ReceiptsPanel company={company} jobCard={jobCard} onChanged={onChanged} />}
       </div>
     </>
   );
@@ -1945,6 +2230,10 @@ export default function App() {
         onEdit={() => setView("settings")}
         onBack={() => setView("jobcards")}
         onEditCard={(jc) => openJobCardForm(jc)}
+        onChanged={(updated) => {
+          setCurrentJobCard(updated);
+          setJobCards((prev) => prev.map((jc) => (jc.id === updated.id ? updated : jc)));
+        }}
         onDeleted={(id) => {
           setJobCards((prev) => prev.filter((jc) => jc.id !== id));
           setView("jobcards");

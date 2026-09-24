@@ -149,3 +149,10 @@ create policy "public read job photos" on storage.objects
   for select using (bucket_id = 'job-photos');
 create policy "public delete job photos" on storage.objects
   for delete using (bucket_id = 'job-photos');
+
+-- ---------------------------------------------------------------------
+-- MIGRATION: Receipts for spares bought (admin only in the app)
+-- Stores scanned receipt files (in the job-photos bucket, under a
+-- receipts/ subfolder) against each job card. Safe to run multiple times.
+-- ---------------------------------------------------------------------
+alter table job_cards add column if not exists receipts jsonb not null default '[]';
