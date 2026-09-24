@@ -261,8 +261,37 @@ function downloadPdf(doc, company) {
   }
 }
 
+// Loads a photo by URL and returns a downscaled JPEG data URL for jsPDF.
+async function loadImageForPdf(url, maxSide = 1400) {
+  const res = await fetch(url);
+  if (!res.ok) throw new Error("HTTP " + res.status);
+  const blob = await res.blob();
+  const objectUrl = URL.createObjectURL(blob);
+  try {
+    const img = await new Promise((resolve, reject) => {
+      const el = new Image();
+      el.onload = () => resolve(el);
+      el.onerror = reject;
+      el.src = objectUrl;
+    });
+    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
+    const w = Math.round(img.naturalWidth * scale);
+    const h = Math.round(img.naturalHeight * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(img, 0, 0, w, h);
+    return { data: canvas.toDataURL("image/jpeg", 0.8), w, h };
+  } finally {
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 // ---------------- Job card PDF export (spares used, no prices) ----------------
-function downloadJobCardPdf(jobCard, company) {
+async function downloadJobCardPdf(jobCard, company) {
   const ACCENT = [30, 58, 95];
   const GOLD = [156, 122, 46];
   const INK = [20, 26, 36];
@@ -402,6 +431,55 @@ function downloadJobCardPdf(jobCard, company) {
       pdf.text(label, x, y + 13);
       pdf.text("Date:", x, y + 27);
     });
+
+    // Photos: two per row on their own page(s) after the sign-off section.
+    const photos = jobCard.photos || [];
+    if (photos.length) {
+      const loaded = [];
+      for (const p of photos) {
+        try {
+          loaded.push(await loadImageForPdf(p.url));
+        } catch (e) {
+          console.warn("Skipped photo in PDF:", p.url, e);
+        }
+      }
+      if (loaded.length) {
+        const gap = 16;
+        const cellW = (contentW - gap) / 2;
+        const cellH = 225;
+        const topY = 60;
+        let col = 0;
+        let rowY = topY + 24;
+        pdf.addPage();
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(9);
+        pdf.setTextColor(...INK);
+        pdf.text(`Photos (${loaded.length})`, marginX, topY);
+        loaded.forEach((img) => {
+          if (rowY + cellH > pageH - 40) {
+            pdf.addPage();
+            rowY = topY;
+            col = 0;
+          }
+          const ratio = Math.min(cellW / img.w, cellH / img.h);
+          const w = img.w * ratio;
+          const h = img.h * ratio;
+          const x = marginX + col * (cellW + gap) + (cellW - w) / 2;
+          const yy = rowY + (cellH - h) / 2;
+          pdf.setFillColor(...PAPER_ALT);
+          pdf.rect(marginX + col * (cellW + gap), rowY, cellW, cellH, "F");
+          pdf.addImage(img.data, "JPEG", x, yy, w, h, undefined, "FAST");
+          col++;
+          if (col === 2) {
+            col = 0;
+            rowY += cellH + gap;
+          }
+        });
+      }
+      if (loaded.length < photos.length) {
+        alert(`${photos.length - loaded.length} photo(s) couldn't be loaded and were left out of the PDF.`);
+      }
+    }
 
     const safeClient = (jobCard.client_name || "job").replace(/[^a-zA-Z0-9_-]+/g, "_");
     pdf.save(`JobCard_${safeClient}_${loggedDate || todayISO()}.pdf`);
@@ -1360,6 +1438,10 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
   const [sparesUsed, setSparesUsed] = useState(initial?.spares_used?.length ? initial.spares_used : [{ desc: "", qty: 1, price: 0 }]);
   const [notes, setNotes] = useState(initial?.notes || "");
   const [photos, setPhotos] = useState(initial?.photos || []);
+  const [receipts, setReceipts] = useState(initial?.receipts || []);
+  const [removedReceiptPaths, setRemovedReceiptPaths] = useState([]);
+  const receiptCameraRef = useRef(null);
+  const receiptFileRef = useRef(null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
 
@@ -1392,6 +1474,42 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
     }
   }
 
+  async function handleReceiptFiles(e) {
+    const files = Array.from(e.target.files || []);
+    e.target.value = "";
+    if (files.length === 0) return;
+    setUploading(true);
+    const uploaded = [];
+    for (const file of files) {
+      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "receipt.jpg";
+      const path = `${company.id}/${id}/receipts/${Date.now()}-${safeName}`;
+      const { error } = await supabase.storage.from("job-photos").upload(path, file);
+      if (error) {
+        alert("Upload failed for " + file.name + ": " + error.message);
+        continue;
+      }
+      const { data } = supabase.storage.from("job-photos").getPublicUrl(path);
+      uploaded.push({
+        path,
+        url: data.publicUrl,
+        name: file.name,
+        type: file.type,
+        uploaded_at: new Date().toISOString(),
+        uploaded_by: technician ? technician.name : "Admin"
+      });
+    }
+    setReceipts((prev) => [...prev, ...uploaded]);
+    setUploading(false);
+  }
+
+  function removeReceipt(idx) {
+    const r = receipts[idx];
+    setReceipts((prev) => prev.filter((_, i) => i !== idx));
+    // The file itself is only deleted once the job card is saved, so
+    // pressing Cancel doesn't leave the saved card pointing at a missing file.
+    if (r?.path) setRemovedReceiptPaths((prev) => [...prev, r.path]);
+  }
+
   function cleanSpares(list) {
     return list
       .filter((it) => it.desc.trim() !== "" || Number(it.price) > 0)
@@ -1411,6 +1529,7 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
       spares_needed: cleanSpares(sparesNeeded),
       spares_used: cleanSpares(sparesUsed),
       photos,
+      receipts,
       notes: notes.trim()
     };
 
@@ -1435,6 +1554,11 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
     if (result.error) {
       alert("Couldn't save: " + result.error.message);
       return;
+    }
+    if (removedReceiptPaths.length) {
+      try {
+        await supabase.storage.from("job-photos").remove(removedReceiptPaths);
+      } catch (e) {}
     }
     onSaved(result.data);
   }
@@ -1504,6 +1628,51 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
         <div className="form-section">
           <h3>Spares used (for the invoice)</h3>
           <LineItemsEditor items={sparesUsed} onChange={setSparesUsed} />
+        </div>
+
+        <div className="form-section">
+          <h3>Receipts for spares bought</h3>
+          <p className="hint" style={{ marginTop: 0, marginBottom: 12 }}>
+            Scan the slip from the hardware store for any spares you bought for this job.
+          </p>
+          {receipts.length > 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
+              {receipts.map((r, idx) => {
+                const isPdf = r.type === "application/pdf" || /\.pdf$/i.test(r.name || r.path || "");
+                return (
+                  <div key={r.path || idx} style={{ position: "relative", width: 84, height: 84 }}>
+                    <a href={r.url} target="_blank" rel="noreferrer">
+                      {isPdf ? (
+                        <div style={{ width: 84, height: 84, borderRadius: 6, border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, color: "var(--ink-soft)", background: "var(--paper-alt)" }}>
+                          PDF
+                        </div>
+                      ) : (
+                        <img src={r.url} alt="Receipt" style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />
+                      )}
+                    </a>
+                    <button
+                      type="button"
+                      onClick={() => removeReceipt(idx)}
+                      style={{ position: "absolute", top: -8, right: -8, width: 22, height: 22, borderRadius: "50%", border: "1px solid var(--line)", background: "#fff", color: "var(--warn)", fontSize: 14, lineHeight: 1, cursor: "pointer" }}
+                    >
+                      ×
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button type="button" className="btn btn-sm btn-primary" disabled={uploading} onClick={() => receiptCameraRef.current?.click()}>
+              Scan receipt
+            </button>
+            <button type="button" className="btn btn-sm" disabled={uploading} onClick={() => receiptFileRef.current?.click()}>
+              Upload file
+            </button>
+          </div>
+          <input ref={receiptCameraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={handleReceiptFiles} />
+          <input ref={receiptFileRef} type="file" accept="image/*,application/pdf" multiple style={{ display: "none" }} onChange={handleReceiptFiles} />
+          {uploading && <p className="hint">Uploading…</p>}
         </div>
 
         <div className="form-section">
@@ -1612,7 +1781,7 @@ function ReceiptsPanel({ company, jobCard, onChanged }) {
         continue;
       }
       const { data } = supabase.storage.from("job-photos").getPublicUrl(path);
-      added.push({ path, url: data.publicUrl, name: file.name, type: file.type, uploaded_at: new Date().toISOString() });
+      added.push({ path, url: data.publicUrl, name: file.name, type: file.type, uploaded_at: new Date().toISOString(), uploaded_by: "Admin" });
     }
     if (added.length) await saveList([...receipts, ...added]);
     setBusy(false);
@@ -1636,7 +1805,7 @@ function ReceiptsPanel({ company, jobCard, onChanged }) {
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
         <div>
           <h3 style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--ink-soft)", margin: 0 }}>Receipts for spares bought</h3>
-          <p className="hint" style={{ margin: "4px 0 0" }}>Admin only — not shown to technicians or on the job card PDF.</p>
+          <p className="hint" style={{ margin: "4px 0 0" }}>Added by technicians or admin. Not included on the job card PDF.</p>
         </div>
         <div style={{ display: "flex", gap: 8 }}>
           <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => cameraRef.current?.click()}>
@@ -1667,7 +1836,10 @@ function ReceiptsPanel({ company, jobCard, onChanged }) {
                     <img src={r.url} alt="Receipt" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />
                   )}
                 </a>
-                <div className="hint" style={{ fontSize: 11 }}>{r.uploaded_at ? fmtDate(r.uploaded_at.slice(0, 10)) : ""}</div>
+                <div className="hint" style={{ fontSize: 11 }}>
+                  {r.uploaded_at ? fmtDate(r.uploaded_at.slice(0, 10)) : ""}
+                  {r.uploaded_by ? ` · ${r.uploaded_by}` : ""}
+                </div>
                 <button
                   type="button"
                   onClick={() => remove(idx)}
@@ -1687,6 +1859,12 @@ function ReceiptsPanel({ company, jobCard, onChanged }) {
 
 // ---------------- Job card detail view ----------------
 function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEditCard, onDeleted, onConvert, onChanged, subtitle }) {
+  const [pdfBusy, setPdfBusy] = useState(false);
+  async function downloadPdfClick() {
+    setPdfBusy(true);
+    await downloadJobCardPdf(jobCard, company);
+    setPdfBusy(false);
+  }
   async function del() {
     if (!confirm("Delete this job card? This can't be undone.")) return;
     const filePaths = [...(jobCard.photos || []), ...(jobCard.receipts || [])].map((p) => p.path).filter(Boolean);
@@ -1711,8 +1889,8 @@ function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEd
             <button className="btn btn-sm" onClick={() => onEditCard(jobCard)}>
               Edit
             </button>
-            <button className="btn btn-sm" onClick={() => downloadJobCardPdf(jobCard, company)}>
-              Download PDF
+            <button className="btn btn-sm" disabled={pdfBusy} onClick={downloadPdfClick}>
+              {pdfBusy ? "Preparing PDF…" : "Download PDF"}
             </button>
             {isAdmin && jobCard.spares_needed?.length > 0 && (
               <button className="btn btn-sm" onClick={() => onConvert(jobCard, "quote")}>
