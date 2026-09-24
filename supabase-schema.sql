@@ -156,3 +156,9 @@ create policy "public delete job photos" on storage.objects
 -- receipts/ subfolder) against each job card. Safe to run multiple times.
 -- ---------------------------------------------------------------------
 alter table job_cards add column if not exists receipts jsonb not null default '[]';
+
+-- ---------------------------------------------------------------------
+-- MIGRATION: Record when job card photos were deleted from storage after
+-- the PDF was downloaded (admin option). Safe to run multiple times.
+-- ---------------------------------------------------------------------
+alter table job_cards add column if not exists photos_removed_at timestamptz, add column if not exists photos_removed_count integer not null default 0;

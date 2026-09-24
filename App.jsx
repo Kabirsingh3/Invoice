@@ -434,6 +434,7 @@ async function downloadJobCardPdf(jobCard, company) {
 
     // Photos: two per row on their own page(s) after the sign-off section.
     const photos = jobCard.photos || [];
+    let photosIncludedCount = 0;
     if (photos.length) {
       const loaded = [];
       for (const p of photos) {
@@ -476,6 +477,7 @@ async function downloadJobCardPdf(jobCard, company) {
           }
         });
       }
+      photosIncludedCount = loaded.length;
       if (loaded.length < photos.length) {
         alert(`${photos.length - loaded.length} photo(s) couldn't be loaded and were left out of the PDF.`);
       }
@@ -483,9 +485,11 @@ async function downloadJobCardPdf(jobCard, company) {
 
     const safeClient = (jobCard.client_name || "job").replace(/[^a-zA-Z0-9_-]+/g, "_");
     pdf.save(`JobCard_${safeClient}_${loggedDate || todayISO()}.pdf`);
+    return { ok: true, photosTotal: photos.length, photosIncluded: photosIncludedCount };
   } catch (err) {
     console.error(err);
     alert("Couldn't generate the job card PDF. Please try again.");
+    return { ok: false, photosTotal: 0, photosIncluded: 0 };
   }
 }
 
@@ -1862,8 +1866,49 @@ function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEd
   const [pdfBusy, setPdfBusy] = useState(false);
   async function downloadPdfClick() {
     setPdfBusy(true);
-    await downloadJobCardPdf(jobCard, company);
+    const result = await downloadJobCardPdf(jobCard, company);
     setPdfBusy(false);
+    if (!isAdmin || !result.ok || result.photosTotal === 0) return;
+    if (result.photosIncluded < result.photosTotal) {
+      alert("Not every photo made it into the PDF, so the photos have been kept on the server. Try downloading again when your connection is better.");
+      return;
+    }
+    const n = result.photosTotal;
+    const ok = confirm(
+      `The PDF was downloaded with all ${n} photo${n > 1 ? "s" : ""}.\n\n` +
+        "First check the PDF saved to your phone and the photos look right.\n\n" +
+        "Delete these photos from Supabase to free up space? This can't be undone, and later PDF downloads won't include them. Receipts are kept."
+    );
+    if (!ok) return;
+    await deletePhotosFromServer();
+  }
+
+  async function deletePhotosFromServer() {
+    const list = jobCard.photos || [];
+    setPdfBusy(true);
+    // Update the job card first: if that fails, no files get deleted.
+    const { data, error } = await supabase
+      .from("job_cards")
+      .update({
+        photos: [],
+        photos_removed_at: new Date().toISOString(),
+        photos_removed_count: (jobCard.photos_removed_count || 0) + list.length
+      })
+      .eq("id", jobCard.id)
+      .select()
+      .single();
+    if (error) {
+      setPdfBusy(false);
+      alert("Couldn't remove the photos: " + error.message + "\n\nIf this mentions photos_removed_at, run the latest SQL migration in Supabase first.");
+      return;
+    }
+    const paths = list.map((p) => p.path).filter(Boolean);
+    if (paths.length) {
+      const { error: storageError } = await supabase.storage.from("job-photos").remove(paths);
+      if (storageError) console.warn("Some photo files may not have been deleted:", storageError);
+    }
+    setPdfBusy(false);
+    onChanged(data);
   }
   async function del() {
     if (!confirm("Delete this job card? This can't be undone.")) return;
@@ -1933,6 +1978,13 @@ function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEd
             {jobCard.quote_id && <> · Quote created</>}
             {jobCard.invoice_id && <> · Invoice created</>}
           </div>
+
+          {jobCard.photos_removed_at && (
+            <div className="hint" style={{ marginBottom: 16 }}>
+              {jobCard.photos_removed_count || ""} photo{jobCard.photos_removed_count === 1 ? "" : "s"} deleted from the server on{" "}
+              {fmtDate(jobCard.photos_removed_at.slice(0, 10))} after the PDF was downloaded. They're only in that downloaded PDF now.
+            </div>
+          )}
 
           {jobCard.photos?.length > 0 && (
             <div style={{ marginBottom: 24 }}>
