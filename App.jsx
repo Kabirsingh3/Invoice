@@ -106,7 +106,7 @@ function downloadPdf(doc, company) {
     pdf.setFontSize(9.5);
     pdf.setTextColor(...INK_SOFT);
     const addrLines = pdf.splitTextToSize(
-      [company.address, company.email, company.phone].filter(Boolean).join("\n"),
+      [company.address, company.email, company.phone, company.website].filter(Boolean).join("\n"),
       260
     );
     pdf.text(addrLines, marginX, nameY + 18);
@@ -261,238 +261,6 @@ function downloadPdf(doc, company) {
   }
 }
 
-// Loads a photo by URL and returns a downscaled JPEG data URL for jsPDF.
-async function loadImageForPdf(url, maxSide = 1400) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  const blob = await res.blob();
-  const objectUrl = URL.createObjectURL(blob);
-  try {
-    const img = await new Promise((resolve, reject) => {
-      const el = new Image();
-      el.onload = () => resolve(el);
-      el.onerror = reject;
-      el.src = objectUrl;
-    });
-    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
-    const w = Math.round(img.naturalWidth * scale);
-    const h = Math.round(img.naturalHeight * scale);
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#FFFFFF";
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
-    return { data: canvas.toDataURL("image/jpeg", 0.8), w, h };
-  } finally {
-    URL.revokeObjectURL(objectUrl);
-  }
-}
-
-// ---------------- Job card PDF export (spares used, no prices) ----------------
-async function downloadJobCardPdf(jobCard, company) {
-  const ACCENT = [30, 58, 95];
-  const GOLD = [156, 122, 46];
-  const INK = [20, 26, 36];
-  const INK_SOFT = [91, 100, 114];
-  const LINE = [219, 223, 217];
-  const PAPER_ALT = [228, 231, 225];
-
-  try {
-    const pdf = new jsPDF({ unit: "pt", format: "a4" });
-    const pageW = pdf.internal.pageSize.getWidth();
-    const pageH = pdf.internal.pageSize.getHeight();
-    const marginX = 48;
-    const contentW = pageW - marginX * 2;
-    const loggedDate = jobCard.created_at ? jobCard.created_at.slice(0, 10) : "";
-    const ref = "JC-" + String(jobCard.id || "").slice(0, 8).toUpperCase();
-
-    pdf.setFillColor(...ACCENT);
-    pdf.rect(0, 0, pageW * 0.82, 7, "F");
-    pdf.setFillColor(...GOLD);
-    pdf.rect(pageW * 0.82, 0, pageW * 0.18, 7, "F");
-
-    let y = 46;
-    let nameY = y;
-    if (company.logo) {
-      try {
-        const fmt = company.logo.includes("image/png") ? "PNG" : "JPEG";
-        pdf.addImage(company.logo, fmt, marginX, y - 8, 42, 42, undefined, "FAST");
-        nameY = y + 50;
-      } catch (e) {}
-    }
-
-    pdf.setFont("times", "bold");
-    pdf.setFontSize(16);
-    pdf.setTextColor(...INK);
-    pdf.text(company.name || "", marginX, nameY);
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(9.5);
-    pdf.setTextColor(...INK_SOFT);
-    const addrLines = pdf.splitTextToSize(
-      [company.address, company.email, company.phone].filter(Boolean).join("\n"),
-      260
-    );
-    pdf.text(addrLines, marginX, nameY + 18);
-
-    pdf.setFont("times", "bold");
-    pdf.setFontSize(24);
-    pdf.setTextColor(...ACCENT);
-    pdf.text("Job Card", pageW - marginX, y + 6, { align: "right" });
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(9.5);
-    pdf.setTextColor(...INK_SOFT);
-    pdf.text(`Ref: ${ref}`, pageW - marginX, y + 26, { align: "right" });
-    pdf.text(`Date: ${fmtDate(loggedDate)}`, pageW - marginX, y + 40, { align: "right" });
-    pdf.text(`Technician: ${jobCard.technician_name || "—"}`, pageW - marginX, y + 54, { align: "right" });
-
-    y = Math.max(nameY + 18 + addrLines.length * 11, y + 74) + 26;
-
-    // Client / site block
-    const siteLines = jobCard.site_address ? pdf.splitTextToSize(jobCard.site_address, contentW - 28) : [];
-    const boxH = 40 + siteLines.length * 11;
-    pdf.setFillColor(...PAPER_ALT);
-    pdf.roundedRect(marginX, y - 16, contentW, boxH, 4, 4, "F");
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(8.5);
-    pdf.setTextColor(...INK_SOFT);
-    pdf.text("CLIENT / SITE", marginX + 14, y);
-    pdf.setFontSize(11.5);
-    pdf.setTextColor(...INK);
-    pdf.text(jobCard.client_name || "", marginX + 14, y + 16);
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(9.5);
-    pdf.setTextColor(...INK_SOFT);
-    if (siteLines.length) pdf.text(siteLines, marginX + 14, y + 30);
-    y += boxH + 14;
-
-    function section(title, text) {
-      if (!text) return;
-      const lines = pdf.splitTextToSize(text, contentW);
-      if (y + 30 + lines.length * 12 > pageH - 60) {
-        pdf.addPage();
-        y = 60;
-      }
-      pdf.setFont("helvetica", "bold");
-      pdf.setFontSize(9);
-      pdf.setTextColor(...INK);
-      pdf.text(title, marginX, y);
-      pdf.setFont("helvetica", "normal");
-      pdf.setTextColor(...INK_SOFT);
-      pdf.text(lines, marginX, y + 14);
-      y += 14 + lines.length * 11 + 16;
-    }
-
-    section("Job description", jobCard.description);
-
-    // Spares used — description and quantity only, no prices
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(9);
-    pdf.setTextColor(...INK);
-    pdf.text("Spares used", marginX, y);
-    y += 8;
-    const used = jobCard.spares_used || [];
-    pdf.autoTable({
-      startY: y,
-      margin: { left: marginX, right: marginX },
-      head: [["Description", "Qty"]],
-      body: used.length ? used.map((it) => [it.desc, String(it.qty)]) : [["No spares recorded", ""]],
-      theme: "plain",
-      styles: { font: "helvetica", fontSize: 9.5, textColor: INK, cellPadding: { top: 8, bottom: 8, left: 10, right: 10 } },
-      headStyles: { fontStyle: "bold", fontSize: 8.5, textColor: [255, 255, 255], fillColor: ACCENT },
-      alternateRowStyles: { fillColor: PAPER_ALT },
-      columnStyles: { 1: { halign: "right", cellWidth: 70 } },
-      didParseCell: (data) => {
-        if (data.section === "body") {
-          data.cell.styles.lineColor = LINE;
-          data.cell.styles.lineWidth = { bottom: 0.5 };
-        }
-      }
-    });
-    y = pdf.lastAutoTable.finalY + 26;
-
-    section("Notes", jobCard.notes);
-
-    // Sign-off lines
-    if (y + 70 > pageH - 40) {
-      pdf.addPage();
-      y = 60;
-    }
-    y = Math.max(y + 20, pageH - 120);
-    const colW = (contentW - 40) / 2;
-    pdf.setDrawColor(...LINE);
-    pdf.setLineWidth(0.75);
-    [["Technician signature", marginX], ["Client signature", marginX + colW + 40]].forEach(([label, x]) => {
-      pdf.line(x, y, x + colW, y);
-      pdf.setFont("helvetica", "normal");
-      pdf.setFontSize(8.5);
-      pdf.setTextColor(...INK_SOFT);
-      pdf.text(label, x, y + 13);
-      pdf.text("Date:", x, y + 27);
-    });
-
-    // Photos: two per row on their own page(s) after the sign-off section.
-    const photos = jobCard.photos || [];
-    let photosIncludedCount = 0;
-    if (photos.length) {
-      const loaded = [];
-      for (const p of photos) {
-        try {
-          loaded.push(await loadImageForPdf(p.url));
-        } catch (e) {
-          console.warn("Skipped photo in PDF:", p.url, e);
-        }
-      }
-      if (loaded.length) {
-        const gap = 16;
-        const cellW = (contentW - gap) / 2;
-        const cellH = 225;
-        const topY = 60;
-        let col = 0;
-        let rowY = topY + 24;
-        pdf.addPage();
-        pdf.setFont("helvetica", "bold");
-        pdf.setFontSize(9);
-        pdf.setTextColor(...INK);
-        pdf.text(`Photos (${loaded.length})`, marginX, topY);
-        loaded.forEach((img) => {
-          if (rowY + cellH > pageH - 40) {
-            pdf.addPage();
-            rowY = topY;
-            col = 0;
-          }
-          const ratio = Math.min(cellW / img.w, cellH / img.h);
-          const w = img.w * ratio;
-          const h = img.h * ratio;
-          const x = marginX + col * (cellW + gap) + (cellW - w) / 2;
-          const yy = rowY + (cellH - h) / 2;
-          pdf.setFillColor(...PAPER_ALT);
-          pdf.rect(marginX + col * (cellW + gap), rowY, cellW, cellH, "F");
-          pdf.addImage(img.data, "JPEG", x, yy, w, h, undefined, "FAST");
-          col++;
-          if (col === 2) {
-            col = 0;
-            rowY += cellH + gap;
-          }
-        });
-      }
-      photosIncludedCount = loaded.length;
-      if (loaded.length < photos.length) {
-        alert(`${photos.length - loaded.length} photo(s) couldn't be loaded and were left out of the PDF.`);
-      }
-    }
-
-    const safeClient = (jobCard.client_name || "job").replace(/[^a-zA-Z0-9_-]+/g, "_");
-    pdf.save(`JobCard_${safeClient}_${loggedDate || todayISO()}.pdf`);
-    return { ok: true, photosTotal: photos.length, photosIncluded: photosIncludedCount };
-  } catch (err) {
-    console.error(err);
-    alert("Couldn't generate the job card PDF. Please try again.");
-    return { ok: false, photosTotal: 0, photosIncluded: 0 };
-  }
-}
-
 // ---------------- Topbar ----------------
 function Topbar({ company, onLogout, onEdit, subtitle }) {
   return (
@@ -568,6 +336,7 @@ function Setup({ which, existingUsernames, onCreated }) {
   const [address, setAddress] = useState("");
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
+  const [website, setWebsite] = useState("");
   const [logo, setLogo] = useState(null);
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
@@ -589,6 +358,7 @@ function Setup({ which, existingUsernames, onCreated }) {
       address: address.trim(),
       email: email.trim(),
       phone: phone.trim(),
+      website: website.trim(),
       logo,
       username: username.trim(),
       password,
@@ -632,6 +402,10 @@ function Setup({ which, existingUsernames, onCreated }) {
               <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Optional" />
             </div>
           </div>
+          <div className="field">
+            <label>Website</label>
+            <input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="Optional" />
+          </div>
           <LogoPicker value={logo} onChange={setLogo} />
           <p className="hint" style={{ marginTop: -8, marginBottom: 16 }}>
             You can add banking details after setup, from "Edit logo" in the top bar.
@@ -660,7 +434,6 @@ function Setup({ which, existingUsernames, onCreated }) {
 // ---------------- Login ----------------
 function Login({ companies, technicians, onLoggedIn }) {
   const [picked, setPicked] = useState(null);
-  const [role, setRole] = useState("admin");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -693,19 +466,16 @@ function Login({ companies, technicians, onLoggedIn }) {
   }
 
   function submit() {
-    if (role === "admin") {
-      if (username === picked.username && password === picked.password) {
-        onLoggedIn({ role: "admin", company: picked });
-        return;
-      }
-    } else {
-      const tech = technicians.find(
-        (t) => t.company_id === picked.id && t.username === username && t.password === password
-      );
-      if (tech) {
-        onLoggedIn({ role: "technician", company: picked, technician: tech });
-        return;
-      }
+    if (username === picked.username && password === picked.password) {
+      onLoggedIn({ role: "admin", company: picked });
+      return;
+    }
+    const tech = technicians.find(
+      (t) => t.company_id === picked.id && t.username === username && t.password === password
+    );
+    if (tech) {
+      onLoggedIn({ role: "technician", company: picked, technician: tech });
+      return;
     }
     setError("Incorrect username or password.");
   }
@@ -716,20 +486,7 @@ function Login({ companies, technicians, onLoggedIn }) {
       <div className="center-screen">
         <div className="panel">
           <h1>{picked.name}</h1>
-          <p className="sub">Choose how you're signing in.</p>
-          <div className="field">
-            <label>Sign in as</label>
-            <select
-              value={role}
-              onChange={(e) => {
-                setRole(e.target.value);
-                setError("");
-              }}
-            >
-              <option value="admin">Admin</option>
-              <option value="technician">Technician</option>
-            </select>
-          </div>
+          <p className="sub">Sign in as the company admin, or as a technician.</p>
           <div className="field">
             <label>Username</label>
             <input value={username} onChange={(e) => setUsername(e.target.value)} />
@@ -747,14 +504,7 @@ function Login({ companies, technicians, onLoggedIn }) {
           <button className="btn btn-primary" style={{ width: "100%" }} onClick={submit}>
             Sign in
           </button>
-          <button
-            className="btn btn-quiet"
-            style={{ width: "100%", marginTop: 8 }}
-            onClick={() => {
-              setPicked(null);
-              setError("");
-            }}
-          >
+          <button className="btn btn-quiet" style={{ width: "100%", marginTop: 8 }} onClick={() => setPicked(null)}>
             ← Choose a different company
           </button>
         </div>
@@ -769,6 +519,7 @@ function Settings({ company, onSaved, onCancel, onLogout }) {
   const [address, setAddress] = useState(company.address || "");
   const [email, setEmail] = useState(company.email || "");
   const [phone, setPhone] = useState(company.phone || "");
+  const [website, setWebsite] = useState(company.website || "");
   const [logo, setLogo] = useState(company.logo || null);
   const [bankAccountHolder, setBankAccountHolder] = useState(company.bank_account_holder || "");
   const [bankName, setBankName] = useState(company.bank_name || "");
@@ -786,6 +537,7 @@ function Settings({ company, onSaved, onCancel, onLogout }) {
         address: address.trim(),
         email: email.trim(),
         phone: phone.trim(),
+        website: website.trim(),
         logo,
         bank_account_holder: bankAccountHolder.trim(),
         bank_name: bankName.trim(),
@@ -829,6 +581,10 @@ function Settings({ company, onSaved, onCancel, onLogout }) {
             <label>Phone</label>
             <input value={phone} onChange={(e) => setPhone(e.target.value)} />
           </div>
+        </div>
+        <div className="field">
+          <label>Website</label>
+          <input value={website} onChange={(e) => setWebsite(e.target.value)} placeholder="e.g. www.izibuloelectrical.co.za" />
         </div>
         <h3 style={{ fontSize: "12.5px", textTransform: "uppercase", letterSpacing: "0.5px", color: "var(--ink-soft)", margin: "22px 0 12px", fontWeight: 600 }}>
           Banking details (shown on every quote &amp; invoice)
@@ -1281,6 +1037,7 @@ function DocumentView({ company, doc, onBack, onLogout, onEdit, onEditDoc, onCha
                 {company.address}
                 {company.email ? "\n" + company.email : ""}
                 {company.phone ? "\n" + company.phone : ""}
+                {company.website ? "\n" + company.website : ""}
               </p>
             </div>
             <div>
@@ -1443,11 +1200,90 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
   const [notes, setNotes] = useState(initial?.notes || "");
   const [photos, setPhotos] = useState(initial?.photos || []);
   const [receipts, setReceipts] = useState(initial?.receipts || []);
-  const [removedReceiptPaths, setRemovedReceiptPaths] = useState([]);
-  const receiptCameraRef = useRef(null);
-  const receiptFileRef = useRef(null);
+  const [scanning, setScanning] = useState(false);
+  const [scanError, setScanError] = useState("");
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
+
+  function fileToBase64(file) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result.split(",")[1]);
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  async function scanReceipt(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setScanError("");
+    setScanning(true);
+
+    const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
+    const path = `${company.id}/${id}/receipts/${Date.now()}-${safeName}`;
+    const { error: uploadError } = await supabase.storage.from("job-photos").upload(path, file);
+    let url = null;
+    if (!uploadError) {
+      const { data } = supabase.storage.from("job-photos").getPublicUrl(path);
+      url = data.publicUrl;
+    }
+
+    let extracted = { vendor: "", date: "", items: [], total: 0 };
+    try {
+      const base64 = await fileToBase64(file);
+      const res = await fetch("/api/extract-receipt", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ imageBase64: base64, mediaType: file.type || "image/jpeg" })
+      });
+      const result = await res.json();
+      if (!res.ok) {
+        setScanError(result.error || "Couldn't read the receipt automatically — you can still add the items manually below.");
+      } else {
+        extracted = result;
+      }
+    } catch (err) {
+      setScanError("Couldn't read the receipt automatically — you can still add the items manually below.");
+    }
+
+    setReceipts((prev) => [...prev, { path, url, ...extracted, addedToSpares: false }]);
+    setScanning(false);
+    e.target.value = "";
+  }
+
+  function updateReceiptField(idx, field, value) {
+    setReceipts((prev) => prev.map((r, i) => (i === idx ? { ...r, [field]: value } : r)));
+  }
+  function updateReceiptItem(idx, itemIdx, field, value) {
+    setReceipts((prev) =>
+      prev.map((r, i) => (i === idx ? { ...r, items: r.items.map((it, j) => (j === itemIdx ? { ...it, [field]: value } : it)) } : r))
+    );
+  }
+  function removeReceiptItem(idx, itemIdx) {
+    setReceipts((prev) => prev.map((r, i) => (i === idx ? { ...r, items: r.items.filter((_, j) => j !== itemIdx) } : r)));
+  }
+  async function removeReceipt(idx) {
+    const receipt = receipts[idx];
+    setReceipts((prev) => prev.filter((_, i) => i !== idx));
+    if (receipt?.path) {
+      try {
+        await supabase.storage.from("job-photos").remove([receipt.path]);
+      } catch (e) {}
+    }
+  }
+  function addReceiptToSparesUsed(idx) {
+    const receipt = receipts[idx];
+    const newRows = receipt.items
+      .filter((it) => it.desc.trim() !== "")
+      .map((it) => ({ desc: it.desc, qty: 1, price: Number(it.amount) || 0 }));
+    if (newRows.length === 0) return;
+    setSparesUsed((prev) => {
+      const withoutBlank = prev.filter((it) => it.desc.trim() !== "" || Number(it.price) > 0);
+      return [...withoutBlank, ...newRows];
+    });
+    updateReceiptField(idx, "addedToSpares", true);
+  }
 
   async function handleFiles(e) {
     const files = Array.from(e.target.files || []);
@@ -1476,42 +1312,6 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
         await supabase.storage.from("job-photos").remove([photo.path]);
       } catch (e) {}
     }
-  }
-
-  async function handleReceiptFiles(e) {
-    const files = Array.from(e.target.files || []);
-    e.target.value = "";
-    if (files.length === 0) return;
-    setUploading(true);
-    const uploaded = [];
-    for (const file of files) {
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "receipt.jpg";
-      const path = `${company.id}/${id}/receipts/${Date.now()}-${safeName}`;
-      const { error } = await supabase.storage.from("job-photos").upload(path, file);
-      if (error) {
-        alert("Upload failed for " + file.name + ": " + error.message);
-        continue;
-      }
-      const { data } = supabase.storage.from("job-photos").getPublicUrl(path);
-      uploaded.push({
-        path,
-        url: data.publicUrl,
-        name: file.name,
-        type: file.type,
-        uploaded_at: new Date().toISOString(),
-        uploaded_by: technician ? technician.name : "Admin"
-      });
-    }
-    setReceipts((prev) => [...prev, ...uploaded]);
-    setUploading(false);
-  }
-
-  function removeReceipt(idx) {
-    const r = receipts[idx];
-    setReceipts((prev) => prev.filter((_, i) => i !== idx));
-    // The file itself is only deleted once the job card is saved, so
-    // pressing Cancel doesn't leave the saved card pointing at a missing file.
-    if (r?.path) setRemovedReceiptPaths((prev) => [...prev, r.path]);
   }
 
   function cleanSpares(list) {
@@ -1558,11 +1358,6 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
     if (result.error) {
       alert("Couldn't save: " + result.error.message);
       return;
-    }
-    if (removedReceiptPaths.length) {
-      try {
-        await supabase.storage.from("job-photos").remove(removedReceiptPaths);
-      } catch (e) {}
     }
     onSaved(result.data);
   }
@@ -1625,6 +1420,77 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
         </div>
 
         <div className="form-section">
+          <h3>Receipts for parts bought</h3>
+          <p className="hint" style={{ marginTop: -4, marginBottom: 14 }}>
+            Scan a receipt and the AI will try to read the items and prices. Review them, then add them to "Spares used" below.
+          </p>
+
+          {receipts.map((r, idx) => (
+            <div key={idx} style={{ border: "1px solid var(--line)", borderRadius: 6, padding: 14, marginBottom: 14, background: "var(--paper)" }}>
+              <div style={{ display: "flex", gap: 14 }}>
+                {r.url && (
+                  <a href={r.url} target="_blank" rel="noreferrer" style={{ flexShrink: 0 }}>
+                    <img src={r.url} alt="" style={{ width: 70, height: 70, objectFit: "cover", borderRadius: 5, border: "1px solid var(--line)" }} />
+                  </a>
+                )}
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="field-row" style={{ marginBottom: 10 }}>
+                    <div className="field" style={{ marginBottom: 0 }}>
+                      <label>Vendor</label>
+                      <input value={r.vendor} onChange={(e) => updateReceiptField(idx, "vendor", e.target.value)} />
+                    </div>
+                    <div className="field" style={{ marginBottom: 0 }}>
+                      <label>Date</label>
+                      <input type="date" value={r.date} onChange={(e) => updateReceiptField(idx, "date", e.target.value)} />
+                    </div>
+                  </div>
+
+                  {r.items.length > 0 ? (
+                    <table className="items-table" style={{ marginBottom: 8 }}>
+                      <tbody>
+                        {r.items.map((it, j) => (
+                          <tr key={j}>
+                            <td>
+                              <input value={it.desc} placeholder="Description" onChange={(e) => updateReceiptItem(idx, j, "desc", e.target.value)} />
+                            </td>
+                            <td className="price-col">
+                              <input type="number" step="0.01" value={it.amount} onChange={(e) => updateReceiptItem(idx, j, "amount", e.target.value)} />
+                            </td>
+                            <td className="rm-col">
+                              <button type="button" className="rm-btn" onClick={() => removeReceiptItem(idx, j)}>
+                                ×
+                              </button>
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  ) : (
+                    <p className="hint" style={{ margin: "0 0 8px" }}>No items read from this receipt — add them manually if needed.</p>
+                  )}
+
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                    <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>Total: R{money(r.total)}</span>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <button type="button" className="btn btn-sm" disabled={r.addedToSpares} onClick={() => addReceiptToSparesUsed(idx)}>
+                        {r.addedToSpares ? "Added to spares used" : "Add to spares used"}
+                      </button>
+                      <button type="button" className="btn btn-sm btn-danger" onClick={() => removeReceipt(idx)}>
+                        Remove
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ))}
+
+          {scanError && <div className="error-msg">{scanError}</div>}
+          <input type="file" accept="image/*" capture="environment" onChange={scanReceipt} disabled={scanning} />
+          {scanning && <p className="hint">Reading receipt…</p>}
+        </div>
+
+        <div className="form-section">
           <h3>Spares needed (for the quote)</h3>
           <LineItemsEditor items={sparesNeeded} onChange={setSparesNeeded} />
         </div>
@@ -1632,51 +1498,6 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
         <div className="form-section">
           <h3>Spares used (for the invoice)</h3>
           <LineItemsEditor items={sparesUsed} onChange={setSparesUsed} />
-        </div>
-
-        <div className="form-section">
-          <h3>Receipts for spares bought</h3>
-          <p className="hint" style={{ marginTop: 0, marginBottom: 12 }}>
-            Scan the slip from the hardware store for any spares you bought for this job.
-          </p>
-          {receipts.length > 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
-              {receipts.map((r, idx) => {
-                const isPdf = r.type === "application/pdf" || /\.pdf$/i.test(r.name || r.path || "");
-                return (
-                  <div key={r.path || idx} style={{ position: "relative", width: 84, height: 84 }}>
-                    <a href={r.url} target="_blank" rel="noreferrer">
-                      {isPdf ? (
-                        <div style={{ width: 84, height: 84, borderRadius: 6, border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, color: "var(--ink-soft)", background: "var(--paper-alt)" }}>
-                          PDF
-                        </div>
-                      ) : (
-                        <img src={r.url} alt="Receipt" style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />
-                      )}
-                    </a>
-                    <button
-                      type="button"
-                      onClick={() => removeReceipt(idx)}
-                      style={{ position: "absolute", top: -8, right: -8, width: 22, height: 22, borderRadius: "50%", border: "1px solid var(--line)", background: "#fff", color: "var(--warn)", fontSize: 14, lineHeight: 1, cursor: "pointer" }}
-                    >
-                      ×
-                    </button>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button type="button" className="btn btn-sm btn-primary" disabled={uploading} onClick={() => receiptCameraRef.current?.click()}>
-              Scan receipt
-            </button>
-            <button type="button" className="btn btn-sm" disabled={uploading} onClick={() => receiptFileRef.current?.click()}>
-              Upload file
-            </button>
-          </div>
-          <input ref={receiptCameraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={handleReceiptFiles} />
-          <input ref={receiptFileRef} type="file" accept="image/*,application/pdf" multiple style={{ display: "none" }} onChange={handleReceiptFiles} />
-          {uploading && <p className="hint">Uploading…</p>}
         </div>
 
         <div className="form-section">
@@ -1753,169 +1574,14 @@ function JobCardList({ company, jobCards, isAdmin, onLogout, onEdit, onNew, onOp
   );
 }
 
-// ---------------- Receipts for spares bought (admin only) ----------------
-function ReceiptsPanel({ company, jobCard, onChanged }) {
-  const [busy, setBusy] = useState(false);
-  const receipts = jobCard.receipts || [];
-  const cameraRef = useRef(null);
-  const fileRef = useRef(null);
-
-  async function saveList(list) {
-    const { data, error } = await supabase.from("job_cards").update({ receipts: list }).eq("id", jobCard.id).select().single();
-    if (error) {
-      alert("Couldn't save receipts: " + error.message);
-      return false;
-    }
-    onChanged(data);
-    return true;
-  }
-
-  async function handleFiles(e) {
-    const files = Array.from(e.target.files || []);
-    e.target.value = "";
-    if (!files.length) return;
-    setBusy(true);
-    const added = [];
-    for (const file of files) {
-      const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "receipt.jpg";
-      const path = `${company.id}/${jobCard.id}/receipts/${Date.now()}-${safeName}`;
-      const { error } = await supabase.storage.from("job-photos").upload(path, file);
-      if (error) {
-        alert("Upload failed for " + file.name + ": " + error.message);
-        continue;
-      }
-      const { data } = supabase.storage.from("job-photos").getPublicUrl(path);
-      added.push({ path, url: data.publicUrl, name: file.name, type: file.type, uploaded_at: new Date().toISOString(), uploaded_by: "Admin" });
-    }
-    if (added.length) await saveList([...receipts, ...added]);
-    setBusy(false);
-  }
-
-  async function remove(idx) {
-    if (!confirm("Remove this receipt?")) return;
-    const r = receipts[idx];
-    setBusy(true);
-    const ok = await saveList(receipts.filter((_, i) => i !== idx));
-    if (ok && r?.path) {
-      try {
-        await supabase.storage.from("job-photos").remove([r.path]);
-      } catch (e) {}
-    }
-    setBusy(false);
-  }
-
-  return (
-    <div className="sheet" style={{ marginTop: 18 }}>
-      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
-        <div>
-          <h3 style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--ink-soft)", margin: 0 }}>Receipts for spares bought</h3>
-          <p className="hint" style={{ margin: "4px 0 0" }}>Added by technicians or admin. Not included on the job card PDF.</p>
-        </div>
-        <div style={{ display: "flex", gap: 8 }}>
-          <button className="btn btn-sm btn-primary" disabled={busy} onClick={() => cameraRef.current?.click()}>
-            Scan receipt
-          </button>
-          <button className="btn btn-sm" disabled={busy} onClick={() => fileRef.current?.click()}>
-            Upload file
-          </button>
-        </div>
-      </div>
-      <input ref={cameraRef} type="file" accept="image/*" capture="environment" style={{ display: "none" }} onChange={handleFiles} />
-      <input ref={fileRef} type="file" accept="image/*,application/pdf" multiple style={{ display: "none" }} onChange={handleFiles} />
-      {busy && <p className="hint">Working…</p>}
-      {receipts.length === 0 ? (
-        <p className="hint">No receipts yet.</p>
-      ) : (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
-          {receipts.map((r, idx) => {
-            const isPdf = r.type === "application/pdf" || /\.pdf$/i.test(r.name || r.path);
-            return (
-              <div key={r.path || idx} style={{ position: "relative", width: 100 }}>
-                <a href={r.url} target="_blank" rel="noreferrer">
-                  {isPdf ? (
-                    <div style={{ width: 100, height: 100, borderRadius: 6, border: "1px solid var(--line)", display: "flex", alignItems: "center", justifyContent: "center", fontWeight: 600, color: "var(--ink-soft)", background: "var(--paper-alt)" }}>
-                      PDF
-                    </div>
-                  ) : (
-                    <img src={r.url} alt="Receipt" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />
-                  )}
-                </a>
-                <div className="hint" style={{ fontSize: 11 }}>
-                  {r.uploaded_at ? fmtDate(r.uploaded_at.slice(0, 10)) : ""}
-                  {r.uploaded_by ? ` · ${r.uploaded_by}` : ""}
-                </div>
-                <button
-                  type="button"
-                  onClick={() => remove(idx)}
-                  disabled={busy}
-                  style={{ position: "absolute", top: -8, right: -8, width: 22, height: 22, borderRadius: "50%", border: "1px solid var(--line)", background: "#fff", color: "var(--warn)", fontSize: 14, lineHeight: 1, cursor: "pointer" }}
-                >
-                  ×
-                </button>
-              </div>
-            );
-          })}
-        </div>
-      )}
-    </div>
-  );
-}
-
 // ---------------- Job card detail view ----------------
-function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEditCard, onDeleted, onConvert, onChanged, subtitle }) {
-  const [pdfBusy, setPdfBusy] = useState(false);
-  async function downloadPdfClick() {
-    setPdfBusy(true);
-    const result = await downloadJobCardPdf(jobCard, company);
-    setPdfBusy(false);
-    if (!isAdmin || !result.ok || result.photosTotal === 0) return;
-    if (result.photosIncluded < result.photosTotal) {
-      alert("Not every photo made it into the PDF, so the photos have been kept on the server. Try downloading again when your connection is better.");
-      return;
-    }
-    const n = result.photosTotal;
-    const ok = confirm(
-      `The PDF was downloaded with all ${n} photo${n > 1 ? "s" : ""}.\n\n` +
-        "First check the PDF saved to your phone and the photos look right.\n\n" +
-        "Delete these photos from Supabase to free up space? This can't be undone, and later PDF downloads won't include them. Receipts are kept."
-    );
-    if (!ok) return;
-    await deletePhotosFromServer();
-  }
-
-  async function deletePhotosFromServer() {
-    const list = jobCard.photos || [];
-    setPdfBusy(true);
-    // Update the job card first: if that fails, no files get deleted.
-    const { data, error } = await supabase
-      .from("job_cards")
-      .update({
-        photos: [],
-        photos_removed_at: new Date().toISOString(),
-        photos_removed_count: (jobCard.photos_removed_count || 0) + list.length
-      })
-      .eq("id", jobCard.id)
-      .select()
-      .single();
-    if (error) {
-      setPdfBusy(false);
-      alert("Couldn't remove the photos: " + error.message + "\n\nIf this mentions photos_removed_at, run the latest SQL migration in Supabase first.");
-      return;
-    }
-    const paths = list.map((p) => p.path).filter(Boolean);
-    if (paths.length) {
-      const { error: storageError } = await supabase.storage.from("job-photos").remove(paths);
-      if (storageError) console.warn("Some photo files may not have been deleted:", storageError);
-    }
-    setPdfBusy(false);
-    onChanged(data);
-  }
+function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEditCard, onDeleted, onConvert, subtitle }) {
   async function del() {
     if (!confirm("Delete this job card? This can't be undone.")) return;
-    const filePaths = [...(jobCard.photos || []), ...(jobCard.receipts || [])].map((p) => p.path).filter(Boolean);
-    if (filePaths.length) {
+    const paths = [...(jobCard.photos || []).map((p) => p.path), ...(jobCard.receipts || []).map((r) => r.path)].filter(Boolean);
+    if (paths.length) {
       try {
-        await supabase.storage.from("job-photos").remove(filePaths);
+        await supabase.storage.from("job-photos").remove(paths);
       } catch (e) {}
     }
     const { error } = await supabase.from("job_cards").delete().eq("id", jobCard.id);
@@ -1933,9 +1599,6 @@ function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEd
             </button>
             <button className="btn btn-sm" onClick={() => onEditCard(jobCard)}>
               Edit
-            </button>
-            <button className="btn btn-sm" disabled={pdfBusy} onClick={downloadPdfClick}>
-              {pdfBusy ? "Preparing PDF…" : "Download PDF"}
             </button>
             {isAdmin && jobCard.spares_needed?.length > 0 && (
               <button className="btn btn-sm" onClick={() => onConvert(jobCard, "quote")}>
@@ -1979,13 +1642,6 @@ function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEd
             {jobCard.invoice_id && <> · Invoice created</>}
           </div>
 
-          {jobCard.photos_removed_at && (
-            <div className="hint" style={{ marginBottom: 16 }}>
-              {jobCard.photos_removed_count || ""} photo{jobCard.photos_removed_count === 1 ? "" : "s"} deleted from the server on{" "}
-              {fmtDate(jobCard.photos_removed_at.slice(0, 10))} after the PDF was downloaded. They're only in that downloaded PDF now.
-            </div>
-          )}
-
           {jobCard.photos?.length > 0 && (
             <div style={{ marginBottom: 24 }}>
               <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 0.4, color: "var(--ink-soft)", fontWeight: 600, marginBottom: 8 }}>
@@ -1995,6 +1651,39 @@ function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEd
                 {jobCard.photos.map((p, idx) => (
                   <a key={idx} href={p.url} target="_blank" rel="noreferrer">
                     <img src={p.url} alt="" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />
+                  </a>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {jobCard.receipts?.length > 0 && (
+            <div style={{ marginBottom: 22 }}>
+              <h3 style={{ fontSize: 12, textTransform: "uppercase", letterSpacing: 0.5, color: "var(--ink-soft)", marginBottom: 10 }}>
+                Receipts
+              </h3>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 12 }}>
+                {jobCard.receipts.map((r, idx) => (
+                  <a
+                    key={idx}
+                    href={r.url}
+                    target="_blank"
+                    rel="noreferrer"
+                    style={{
+                      display: "block",
+                      width: 150,
+                      border: "1px solid var(--line)",
+                      borderRadius: 6,
+                      overflow: "hidden",
+                      textDecoration: "none",
+                      color: "inherit"
+                    }}
+                  >
+                    {r.url && <img src={r.url} alt="" style={{ width: "100%", height: 90, objectFit: "cover" }} />}
+                    <div style={{ padding: "6px 8px", fontSize: 11.5 }}>
+                      <div style={{ fontWeight: 600 }}>{r.vendor || "Receipt"}</div>
+                      <div style={{ color: "var(--ink-soft)" }}>R{money(r.total)}</div>
+                    </div>
                   </a>
                 ))}
               </div>
@@ -2059,8 +1748,6 @@ function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEd
             </div>
           )}
         </div>
-
-        {isAdmin && <ReceiptsPanel company={company} jobCard={jobCard} onChanged={onChanged} />}
       </div>
     </>
   );
@@ -2460,10 +2147,6 @@ export default function App() {
         onEdit={() => setView("settings")}
         onBack={() => setView("jobcards")}
         onEditCard={(jc) => openJobCardForm(jc)}
-        onChanged={(updated) => {
-          setCurrentJobCard(updated);
-          setJobCards((prev) => prev.map((jc) => (jc.id === updated.id ? updated : jc)));
-        }}
         onDeleted={(id) => {
           setJobCards((prev) => prev.filter((jc) => jc.id !== id));
           setView("jobcards");

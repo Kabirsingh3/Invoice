@@ -45,5 +45,10 @@ Any time you want to make a change: update the files in the GitHub repo (edit di
 - **Adding a logo later:** once logged in as admin, use "Edit logo" in the top bar.
 - **Banking details:** set once per company under "Edit logo" (the same settings screen) — separate fields for Account Holder, Bank Name, Account Type, Branch Code, and Account Number, shown automatically on every quote and invoice.
 - **Job cards & technicians:** from the admin dashboard, the "Technicians" tab lets you create individual logins for each technician. A technician can only reach job cards — never quotes, invoices, or company settings. On a job card, "Spares needed" becomes a quote's line items and "Spares used" becomes an invoice's line items, with one click from the job card's page (admin only). Photos are stored in Supabase Storage (a `job-photos` bucket, created automatically by the schema SQL) rather than the database.
+- **Receipt scanning:** on a job card, "Scan receipt" uploads a photo and sends it to Claude's AI vision API (via `api/extract-receipt.js`, a small serverless function) to read the vendor, items, and prices. This needs its own setup and has its own running cost, separate from Supabase/Vercel:
+  1. Get an API key at **console.anthropic.com** (requires adding billing there — this is pay-as-you-go, typically a fraction of a cent per receipt scanned with the model used here, but it is a real, separate charge).
+  2. In your Vercel project, go to **Settings → Environment Variables** and add `ANTHROPIC_API_KEY` (no `VITE_` prefix — this one must stay server-side, so don't expose it any other way).
+  3. Redeploy.
+  
+  If this key isn't set, "Scan receipt" will still upload the photo but show an error instead of extracted items — technicians can still type the items in manually from there.
 
-- **Job card PDF & receipts:** every job card has a "Download PDF" button (admin and technicians) that shows the job details and spares used with quantities only — no prices. Technicians can scan (phone camera) or upload hardware receipts for spares bought in the "Receipts for spares bought" section of the job card form, and admins see and manage them on the job card page. Receipts are not included on the PDF. Run the latest migration block at the bottom of `supabase-schema.sql` once to add the `receipts` column.
