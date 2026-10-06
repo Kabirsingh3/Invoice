@@ -307,9 +307,102 @@ async function decodeImage(blob) {
   }
 }
 
+// ---------------- Photo helpers (HEIC conversion + shrinking) ----------------
+// Many Android (Samsung) and iPhone cameras save photos as HEIC, which Chrome
+// can't display. We convert HEIC to JPEG in the browser (heic-to library,
+// only loaded when a HEIC photo actually appears) and shrink photos before
+// upload so they display everywhere and use far less Supabase storage.
+function looksHeic(blob, nameOrPath = "") {
+  const t = (blob?.type || "").toLowerCase();
+  return t.includes("heic") || t.includes("heif") || /\.(heic|heif)(\?|$)/i.test(nameOrPath);
+}
+
+async function heicToJpegBlob(blob) {
+  const { heicTo } = await import("heic-to");
+  return await heicTo({ blob, type: "image/jpeg", quality: 0.85 });
+}
+
+async function prepareImageForUpload(file, maxSide = 1600, quality = 0.8) {
+  const isImage = (file.type || "").startsWith("image/") || looksHeic(file, file.name);
+  if (!isImage) return file; // e.g. PDF receipts are uploaded as-is
+  try {
+    let blob = file;
+    if (looksHeic(file, file.name)) blob = await heicToJpegBlob(file);
+    const { source, w: srcW, h: srcH } = await decodeImage(blob);
+    const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
+    const w = Math.round(srcW * scale);
+    const h = Math.round(srcH * scale);
+    const canvas = document.createElement("canvas");
+    canvas.width = w;
+    canvas.height = h;
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#FFFFFF";
+    ctx.fillRect(0, 0, w, h);
+    ctx.drawImage(source, 0, 0, w, h);
+    if (source.close) source.close();
+    const out = await new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", quality));
+    if (!out) return file;
+    const base = (file.name || "photo").replace(/\.[^.]+$/, "") || "photo";
+    return new File([out], base + ".jpg", { type: "image/jpeg" });
+  } catch (e) {
+    console.warn("Couldn't convert/shrink image, uploading original:", e);
+    return file;
+  }
+}
+
+// Shows a stored photo/receipt; HEIC files are converted on the fly so they
+// display in Chrome.
+function StoredImage({ item, style, alt = "" }) {
+  const heic = looksHeic({ type: item?.type }, item?.path || item?.url || item?.name || "");
+  const [src, setSrc] = useState(heic ? null : item?.url);
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    if (!heic) {
+      setSrc(item?.url);
+      return;
+    }
+    let objectUrl = null;
+    let cancelled = false;
+    setSrc(null);
+    setFailed(false);
+    (async () => {
+      try {
+        const blob = await getPhotoBlob(item);
+        const jpg = await heicToJpegBlob(blob);
+        if (cancelled) return;
+        objectUrl = URL.createObjectURL(jpg);
+        setSrc(objectUrl);
+      } catch (e) {
+        console.warn("Couldn't display HEIC photo:", e);
+        if (!cancelled) setFailed(true);
+      }
+    })();
+    return () => {
+      cancelled = true;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [item?.url, item?.path]);
+  if (!src) {
+    return (
+      <div style={{ ...style, display: "flex", alignItems: "center", justifyContent: "center", background: "var(--paper-alt)", color: "var(--ink-soft)", fontSize: 11, textAlign: "center" }}>
+        {failed ? "Can't show" : "Loading…"}
+      </div>
+    );
+  }
+  return <img src={src} alt={alt} style={style} />;
+}
+
 async function loadImageForPdf(photo, maxSide = 1400) {
-  const blob = await getPhotoBlob(photo);
-  const { source, w: srcW, h: srcH } = await decodeImage(blob);
+  let blob = await getPhotoBlob(photo);
+  if (looksHeic(blob, photo.path || photo.url || "")) blob = await heicToJpegBlob(blob);
+  let decoded;
+  try {
+    decoded = await decodeImage(blob);
+  } catch (e) {
+    // Last try: the file may be HEIC without saying so.
+    decoded = await decodeImage(await heicToJpegBlob(blob));
+  }
+  const { source, w: srcW, h: srcH } = decoded;
   if (!srcW || !srcH) throw new Error("Empty image");
   const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
   const w = Math.round(srcW * scale);
@@ -1497,13 +1590,16 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
     if (files.length === 0) return;
     setUploading(true);
     const uploaded = [];
-    for (const file of files) {
+    for (const rawFile of files) {
+      const file = await prepareImageForUpload(rawFile);
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_");
       const path = `${company.id}/${id}/${Date.now()}-${safeName}`;
-      const { error } = await supabase.storage.from("job-photos").upload(path, file);
+      const { error } = await supabase.storage.from("job-photos").upload(path, file, { contentType: file.type || undefined });
       if (!error) {
         const { data } = supabase.storage.from("job-photos").getPublicUrl(path);
-        uploaded.push({ path, url: data.publicUrl });
+        uploaded.push({ path, url: data.publicUrl, type: file.type });
+      } else {
+        alert("Upload failed for " + rawFile.name + ": " + error.message);
       }
     }
     setPhotos((prev) => [...prev, ...uploaded]);
@@ -1527,10 +1623,11 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
     if (files.length === 0) return;
     setUploading(true);
     const uploaded = [];
-    for (const file of files) {
+    for (const rawFile of files) {
+      const file = await prepareImageForUpload(rawFile);
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "receipt.jpg";
       const path = `${company.id}/${id}/receipts/${Date.now()}-${safeName}`;
-      const { error } = await supabase.storage.from("job-photos").upload(path, file);
+      const { error } = await supabase.storage.from("job-photos").upload(path, file, { contentType: file.type || undefined });
       if (error) {
         alert("Upload failed for " + file.name + ": " + error.message);
         continue;
@@ -1635,9 +1732,8 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
           <div style={{ display: "flex", flexWrap: "wrap", gap: 10, marginBottom: 12 }}>
             {photos.map((p, idx) => (
               <div key={idx} style={{ position: "relative", width: 84, height: 84 }}>
-                <img
-                  src={p.url}
-                  alt=""
+                <StoredImage
+                  item={p}
                   style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }}
                 />
                 <button
@@ -1694,7 +1790,7 @@ function JobCardForm({ company, technician, initial, onCancel, onSaved, onLogout
                           PDF
                         </div>
                       ) : (
-                        <img src={r.url} alt="Receipt" style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />
+                        <StoredImage item={r} alt="Receipt" style={{ width: 84, height: 84, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />
                       )}
                     </a>
                     <button
@@ -1819,10 +1915,11 @@ function ReceiptsPanel({ company, jobCard, onChanged }) {
     if (!files.length) return;
     setBusy(true);
     const added = [];
-    for (const file of files) {
+    for (const rawFile of files) {
+      const file = await prepareImageForUpload(rawFile);
       const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, "_") || "receipt.jpg";
       const path = `${company.id}/${jobCard.id}/receipts/${Date.now()}-${safeName}`;
-      const { error } = await supabase.storage.from("job-photos").upload(path, file);
+      const { error } = await supabase.storage.from("job-photos").upload(path, file, { contentType: file.type || undefined });
       if (error) {
         alert("Upload failed for " + file.name + ": " + error.message);
         continue;
@@ -1880,7 +1977,7 @@ function ReceiptsPanel({ company, jobCard, onChanged }) {
                       PDF
                     </div>
                   ) : (
-                    <img src={r.url} alt="Receipt" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />
+                    <StoredImage item={r} alt="Receipt" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />
                   )}
                 </a>
                 <div className="hint" style={{ fontSize: 11 }}>
@@ -2037,7 +2134,7 @@ function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEd
               <div style={{ display: "flex", flexWrap: "wrap", gap: 10 }}>
                 {jobCard.photos.map((p, idx) => (
                   <a key={idx} href={p.url} target="_blank" rel="noreferrer">
-                    <img src={p.url} alt="" style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />
+                    <StoredImage item={p} style={{ width: 100, height: 100, objectFit: "cover", borderRadius: 6, border: "1px solid var(--line)" }} />
                   </a>
                 ))}
               </div>
