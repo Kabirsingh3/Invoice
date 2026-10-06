@@ -829,19 +829,22 @@ function Login({ companies, technicians, onLoggedIn }) {
   }
 
   function submit() {
+    const u = username.trim();
+    const match = technicians.find((t) => t.company_id === picked.id && t.username === u && t.password === password);
+    const matchRole = match ? userRole(match) : null;
     if (role === "admin") {
-      if (username === picked.username && password === picked.password) {
-        onLoggedIn({ role: "admin", company: picked });
+      // The company's main login is always the super admin.
+      if (u === picked.username && password === picked.password) {
+        onLoggedIn({ role: "admin", superAdmin: true, company: picked, user: null });
         return;
       }
-    } else {
-      const tech = technicians.find(
-        (t) => t.company_id === picked.id && t.username === username && t.password === password
-      );
-      if (tech) {
-        onLoggedIn({ role: "technician", company: picked, technician: tech });
+      if (match && (matchRole === "admin" || matchRole === "super_admin")) {
+        onLoggedIn({ role: "admin", superAdmin: matchRole === "super_admin", company: picked, user: match });
         return;
       }
+    } else if (match && matchRole === "technician") {
+      onLoggedIn({ role: "technician", superAdmin: false, company: picked, technician: match, user: match });
+      return;
     }
     setError("Incorrect username or password.");
   }
@@ -1007,14 +1010,27 @@ function Settings({ company, onSaved, onCancel, onLogout }) {
 }
 
 // ---------------- Admin section tabs (shared by document/job-card/technician screens) ----------------
+// ---------------- Roles ----------------
+// technician  = job cards only
+// admin       = everything, except managing users
+// super_admin = everything, including creating users and setting passwords
+// The company's main login (from setup) is always a super admin.
+const ROLE_LABELS = { technician: "Technician", admin: "Admin", super_admin: "Super admin" };
+function userRole(u) {
+  return u?.role && ROLE_LABELS[u.role] ? u.role : "technician";
+}
+// Set by <App> on every render so the tabs know whether to show "Users".
+let currentUserIsSuperAdmin = false;
+
 function AdminTabs({ active, onChange }) {
+  const tabs = [
+    ["documents", "Quotes & Invoices"],
+    ["jobcards", "Job Cards"]
+  ];
+  if (currentUserIsSuperAdmin) tabs.push(["technicians", "Users"]);
   return (
     <div className="tabs">
-      {[
-        ["documents", "Quotes & Invoices"],
-        ["jobcards", "Job Cards"],
-        ["technicians", "Technicians"]
-      ].map(([key, label]) => (
+      {tabs.map(([key, label]) => (
         <button key={key} className={`tab ${active === key ? "active" : ""}`} onClick={() => onChange(key)}>
           {label}
         </button>
@@ -2207,18 +2223,29 @@ function JobCardView({ company, jobCard, isAdmin, onBack, onLogout, onEdit, onEd
 }
 
 // ---------------- Technician management (admin only) ----------------
-function TechnicianManager({ company, technicians, onLogout, onEdit, onSection, onChanged }) {
+function TechnicianManager({ company, technicians, currentUser, onLogout, onEdit, onSection, onChanged }) {
   const [name, setName] = useState("");
   const [username, setUsername] = useState("");
   const [password, setPassword] = useState("");
+  const [newRole, setNewRole] = useState("technician");
   const [error, setError] = useState("");
   const [saving, setSaving] = useState(false);
 
-  const companyTechs = technicians.filter((t) => t.company_id === company.id);
+  const companyUsers = technicians
+    .filter((t) => t.company_id === company.id)
+    .sort((a, b) => a.name.localeCompare(b.name));
 
-  async function addTechnician() {
+  function isSelf(u) {
+    return currentUser && currentUser.id === u.id;
+  }
+
+  async function addUser() {
     if (!name.trim() || !username.trim() || !password) {
       setError("Name, username and password are required.");
+      return;
+    }
+    if (username.trim() === company.username) {
+      setError("That username is the company's main login. Pick a different one.");
       return;
     }
     setError("");
@@ -2227,23 +2254,49 @@ function TechnicianManager({ company, technicians, onLogout, onEdit, onSection, 
       company_id: company.id,
       name: name.trim(),
       username: username.trim(),
-      password
+      password,
+      role: newRole
     });
     setSaving(false);
     if (insertError) {
-      setError(insertError.message.includes("duplicate") ? "That username is already taken." : "Couldn't save: " + insertError.message);
+      if (insertError.message.includes("duplicate")) setError("That username is already taken.");
+      else if (insertError.message.includes("role")) setError("Run the latest SQL migration in Supabase first (adds the role column).");
+      else setError("Couldn't save: " + insertError.message);
       return;
     }
     setName("");
     setUsername("");
     setPassword("");
+    setNewRole("technician");
     onChanged();
   }
 
-  async function removeTechnician(id) {
-    if (!confirm("Remove this technician's login?")) return;
-    const { error } = await supabase.from("technicians").delete().eq("id", id);
-    if (!error) onChanged();
+  async function changeRole(u, role) {
+    if (isSelf(u)) return;
+    const { error } = await supabase.from("technicians").update({ role }).eq("id", u.id);
+    if (error) alert("Couldn't change role: " + error.message);
+    onChanged();
+  }
+
+  async function resetPassword(u) {
+    const pw = prompt(`New password for ${u.name}:`);
+    if (pw === null) return;
+    if (!pw.trim()) {
+      alert("Password can't be empty.");
+      return;
+    }
+    const { error } = await supabase.from("technicians").update({ password: pw }).eq("id", u.id);
+    if (error) alert("Couldn't change password: " + error.message);
+    else alert(`Password updated for ${u.name}.`);
+    onChanged();
+  }
+
+  async function removeUser(u) {
+    if (isSelf(u)) return;
+    if (!confirm(`Remove ${u.name}'s login?`)) return;
+    const { error } = await supabase.from("technicians").delete().eq("id", u.id);
+    if (error) alert("Couldn't remove: " + error.message);
+    onChanged();
   }
 
   return (
@@ -2253,29 +2306,41 @@ function TechnicianManager({ company, technicians, onLogout, onEdit, onSection, 
         <AdminTabs active="technicians" onChange={onSection} />
 
         <div className="form-section" style={{ maxWidth: 440 }}>
-          <h3>Add a technician</h3>
+          <h3>Add a user</h3>
           <div className="field">
             <label>Name</label>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Kabir Singh" />
+            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Sipho Dlamini" />
           </div>
           <div className="field">
             <label>Username</label>
-            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. kabir-tech" />
+            <input value={username} onChange={(e) => setUsername(e.target.value)} placeholder="e.g. sipho" autoCapitalize="none" />
           </div>
-          <div className="field" style={{ marginBottom: 0 }}>
+          <div className="field">
             <label>Password</label>
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
           </div>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <label>Role</label>
+            <select value={newRole} onChange={(e) => setNewRole(e.target.value)}>
+              <option value="technician">Technician — job cards only</option>
+              <option value="admin">Admin — full access, can't manage users</option>
+              <option value="super_admin">Super admin — full access + manage users</option>
+            </select>
+          </div>
           {error && <div className="error-msg" style={{ marginTop: 12 }}>{error}</div>}
-          <button className="btn btn-primary" style={{ marginTop: 16 }} disabled={saving} onClick={addTechnician}>
-            {saving ? "Adding…" : "Add technician"}
+          <button className="btn btn-primary" style={{ marginTop: 16 }} disabled={saving} onClick={addUser}>
+            {saving ? "Adding…" : "Add user"}
           </button>
         </div>
 
-        {companyTechs.length === 0 ? (
+        <p className="hint" style={{ margin: "0 0 12px" }}>
+          The company's main login ({company.username}) is always a super admin.
+        </p>
+
+        {companyUsers.length === 0 ? (
           <div className="empty-state">
-            <div className="big">No technicians yet</div>
-            <div>Add one above to give them job-card-only access.</div>
+            <div className="big">No users yet</div>
+            <div>Add one above.</div>
           </div>
         ) : (
           <div className="doclist-wrap">
@@ -2284,18 +2349,36 @@ function TechnicianManager({ company, technicians, onLogout, onEdit, onSection, 
                 <tr>
                   <th>Name</th>
                   <th>Username</th>
+                  <th>Role</th>
                   <th></th>
                 </tr>
               </thead>
               <tbody>
-                {companyTechs.map((t) => (
-                  <tr key={t.id}>
-                    <td>{t.name}</td>
-                    <td className="num-cell">{t.username}</td>
-                    <td style={{ textAlign: "right" }}>
-                      <button className="btn btn-sm btn-danger" onClick={() => removeTechnician(t.id)}>
-                        Remove
-                      </button>
+                {companyUsers.map((u) => (
+                  <tr key={u.id}>
+                    <td>
+                      {u.name}
+                      {isSelf(u) ? " (you)" : ""}
+                    </td>
+                    <td className="num-cell">{u.username}</td>
+                    <td>
+                      <select value={userRole(u)} disabled={isSelf(u)} onChange={(e) => changeRole(u, e.target.value)}>
+                        {Object.entries(ROLE_LABELS).map(([k, label]) => (
+                          <option key={k} value={k}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </td>
+                    <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
+                      <button className="btn btn-sm" onClick={() => resetPassword(u)}>
+                        Password
+                      </button>{" "}
+                      {!isSelf(u) && (
+                        <button className="btn btn-sm btn-danger" onClick={() => removeUser(u)}>
+                          Remove
+                        </button>
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -2344,6 +2427,12 @@ export default function App() {
   async function refreshTechnicians() {
     const { data } = await supabase.from("technicians").select("*");
     setTechnicians(data || []);
+    // If the signed-in user's own record changed, keep the session up to date.
+    setSession((prev) => {
+      if (!prev?.user) return prev;
+      const fresh = (data || []).find((t) => t.id === prev.user.id);
+      return fresh ? { ...prev, user: fresh, technician: prev.technician ? fresh : prev.technician } : prev;
+    });
   }
 
   async function loadDocs(companyId) {
@@ -2377,7 +2466,11 @@ export default function App() {
 
   const company = session?.company;
   const isAdmin = session?.role === "admin";
-  const roleSubtitle = session?.role === "technician" ? `${session.technician.name} (technician)` : null;
+  const isSuperAdmin = isAdmin && !!session?.superAdmin;
+  currentUserIsSuperAdmin = isSuperAdmin;
+  const roleSubtitle = session?.user
+    ? `${session.user.name} (${ROLE_LABELS[userRole(session.user)].toLowerCase()})`
+    : null;
 
   function goSection(key) {
     if (key === "documents") setView("dashboard");
@@ -2477,11 +2570,12 @@ export default function App() {
     );
   }
 
-  if (effectiveView === "technicians" && isAdmin) {
+  if (effectiveView === "technicians" && isSuperAdmin) {
     return (
       <TechnicianManager
         company={company}
         technicians={technicians}
+        currentUser={session.user}
         onLogout={handleLogout}
         onEdit={() => setView("settings")}
         onSection={goSection}
@@ -2572,7 +2666,7 @@ export default function App() {
     return (
       <JobCardForm
         company={company}
-        technician={session.role === "technician" ? session.technician : null}
+        technician={session.user || null}
         initial={jobCardFormInitial}
         subtitle={roleSubtitle}
         onLogout={handleLogout}

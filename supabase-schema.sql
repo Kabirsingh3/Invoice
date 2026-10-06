@@ -162,3 +162,11 @@ alter table job_cards add column if not exists receipts jsonb not null default '
 -- the PDF was downloaded (admin option). Safe to run multiple times.
 -- ---------------------------------------------------------------------
 alter table job_cards add column if not exists photos_removed_at timestamptz, add column if not exists photos_removed_count integer not null default 0;
+
+-- ---------------------------------------------------------------------
+-- MIGRATION: User roles. Every login in the technicians table gets a role:
+-- technician (job cards only), admin (full access, can't manage users) or
+-- super_admin (full access + manage users). Existing logins stay technicians.
+-- The company's main login is always a super admin. Safe to run multiple times.
+-- ---------------------------------------------------------------------
+alter table technicians add column if not exists role text not null default 'technician' check (role in ('technician', 'admin', 'super_admin'));
