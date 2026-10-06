@@ -261,33 +261,68 @@ function downloadPdf(doc, company) {
   }
 }
 
-// Loads a photo by URL and returns a downscaled JPEG data URL for jsPDF.
-async function loadImageForPdf(url, maxSide = 1400) {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error("HTTP " + res.status);
-  const blob = await res.blob();
+// Loads a job photo and returns a downscaled JPEG data URL for jsPDF.
+// Tries the Supabase storage API first (avoids browser cache / CORS problems
+// with the public URL), then falls back to fetching the public URL.
+async function getPhotoBlob(photo) {
+  let firstError = null;
+  if (photo.path) {
+    try {
+      const { data, error } = await supabase.storage.from("job-photos").download(photo.path);
+      if (error) throw error;
+      if (data && data.size > 0) return data;
+    } catch (e) {
+      firstError = e;
+    }
+  }
+  if (photo.url) {
+    const sep = photo.url.includes("?") ? "&" : "?";
+    const res = await fetch(photo.url + sep + "pdf=" + Date.now(), { cache: "no-store" });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    return await res.blob();
+  }
+  throw firstError || new Error("Photo has no path or URL");
+}
+
+async function decodeImage(blob) {
+  if (typeof createImageBitmap === "function") {
+    try {
+      const bmp = await createImageBitmap(blob);
+      return { source: bmp, w: bmp.width, h: bmp.height };
+    } catch (e) {
+      // fall through to <img> decoding
+    }
+  }
   const objectUrl = URL.createObjectURL(blob);
   try {
     const img = await new Promise((resolve, reject) => {
       const el = new Image();
       el.onload = () => resolve(el);
-      el.onerror = reject;
+      el.onerror = () => reject(new Error("This photo format can't be read by the browser (" + (blob.type || "unknown") + ")"));
       el.src = objectUrl;
     });
-    const scale = Math.min(1, maxSide / Math.max(img.naturalWidth, img.naturalHeight));
-    const w = Math.round(img.naturalWidth * scale);
-    const h = Math.round(img.naturalHeight * scale);
-    const canvas = document.createElement("canvas");
-    canvas.width = w;
-    canvas.height = h;
-    const ctx = canvas.getContext("2d");
-    ctx.fillStyle = "#FFFFFF";
-    ctx.fillRect(0, 0, w, h);
-    ctx.drawImage(img, 0, 0, w, h);
-    return { data: canvas.toDataURL("image/jpeg", 0.8), w, h };
+    return { source: img, w: img.naturalWidth, h: img.naturalHeight };
   } finally {
-    URL.revokeObjectURL(objectUrl);
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 0);
   }
+}
+
+async function loadImageForPdf(photo, maxSide = 1400) {
+  const blob = await getPhotoBlob(photo);
+  const { source, w: srcW, h: srcH } = await decodeImage(blob);
+  if (!srcW || !srcH) throw new Error("Empty image");
+  const scale = Math.min(1, maxSide / Math.max(srcW, srcH));
+  const w = Math.round(srcW * scale);
+  const h = Math.round(srcH * scale);
+  const canvas = document.createElement("canvas");
+  canvas.width = w;
+  canvas.height = h;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#FFFFFF";
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(source, 0, 0, w, h);
+  if (source.close) source.close();
+  return { data: canvas.toDataURL("image/jpeg", 0.8), w, h };
 }
 
 // ---------------- Job card PDF export (spares used, no prices) ----------------
@@ -413,6 +448,9 @@ async function downloadJobCardPdf(jobCard, company) {
     y = pdf.lastAutoTable.finalY + 26;
 
     section("Notes", jobCard.notes);
+    if ((jobCard.photos || []).length) {
+      section("Photos", `${jobCard.photos.length} photo(s) attached on the following page(s).`);
+    }
 
     // Sign-off lines
     if (y + 70 > pageH - 40) {
@@ -437,11 +475,13 @@ async function downloadJobCardPdf(jobCard, company) {
     let photosIncludedCount = 0;
     if (photos.length) {
       const loaded = [];
+      let lastPhotoError = "";
       for (const p of photos) {
         try {
-          loaded.push(await loadImageForPdf(p.url));
+          loaded.push(await loadImageForPdf(p));
         } catch (e) {
           console.warn("Skipped photo in PDF:", p.url, e);
+          lastPhotoError = e?.message || String(e);
         }
       }
       if (loaded.length) {
@@ -479,7 +519,10 @@ async function downloadJobCardPdf(jobCard, company) {
       }
       photosIncludedCount = loaded.length;
       if (loaded.length < photos.length) {
-        alert(`${photos.length - loaded.length} photo(s) couldn't be loaded and were left out of the PDF.`);
+        alert(
+          `${photos.length - loaded.length} of ${photos.length} photo(s) couldn't be loaded and were left out of the PDF.` +
+            (lastPhotoError ? `\n\nReason: ${lastPhotoError}` : "")
+        );
       }
     }
 
