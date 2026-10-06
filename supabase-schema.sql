@@ -151,14 +151,14 @@ create policy "public delete job photos" on storage.objects
   for delete using (bucket_id = 'job-photos');
 
 -- ---------------------------------------------------------------------
--- MIGRATION: Receipt scanning
--- Stores the receipt photo reference plus whatever the AI extraction
--- found (vendor, date, line items, total) so it can be reviewed/edited
--- before being added to a job card's spares used.
+-- MIGRATION: Receipts for spares bought (admin only in the app)
+-- Stores scanned receipt files (in the job-photos bucket, under a
+-- receipts/ subfolder) against each job card. Safe to run multiple times.
 -- ---------------------------------------------------------------------
 alter table job_cards add column if not exists receipts jsonb not null default '[]';
 
 -- ---------------------------------------------------------------------
--- MIGRATION: Company website
+-- MIGRATION: Record when job card photos were deleted from storage after
+-- the PDF was downloaded (admin option). Safe to run multiple times.
 -- ---------------------------------------------------------------------
-alter table companies add column if not exists website text default '';
+alter table job_cards add column if not exists photos_removed_at timestamptz, add column if not exists photos_removed_count integer not null default 0;
