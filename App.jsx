@@ -1113,16 +1113,22 @@ function Dashboard({ company, docs, onLogout, onEdit, onNew, onOpen, filter, set
 function DocumentForm({ company, initial, onCancel, onSaved, onUpdated, onLogout, onEdit }) {
   const isEditing = !!initial.editingId;
   const [type, setType] = useState(initial.type);
-  const [clientName, setClientName] = useState(initial.client.name);
-  const [clientEmail, setClientEmail] = useState(initial.client.email);
-  const [clientAddress, setClientAddress] = useState(initial.client.address);
-  const [issueDate, setIssueDate] = useState(initial.issueDate);
-  const [dueDate, setDueDate] = useState(initial.dueDate);
-  const [items, setItems] = useState(initial.items);
-  const [taxEnabled, setTaxEnabled] = useState(initial.taxEnabled !== undefined ? initial.taxEnabled : true);
-  const [taxRate, setTaxRate] = useState(initial.taxRate);
-  const [notes, setNotes] = useState(initial.notes);
-  const [terms, setTerms] = useState(initial.terms);
+  const [clientName, setClientName] = useState(initial.client?.name ?? "");
+  const [clientEmail, setClientEmail] = useState(initial.client?.email ?? "");
+  const [clientAddress, setClientAddress] = useState(initial.client?.address ?? "");
+  const [issueDate, setIssueDate] = useState(initial.issueDate || todayISO());
+  const [dueDate, setDueDate] = useState(initial.dueDate || plusDays(todayISO(), 14));
+  const [items, setItems] = useState(
+    (initial.items && initial.items.length ? initial.items : [{ desc: "", qty: 1, price: 0 }]).map((it) => ({
+      desc: it?.desc ?? "",
+      qty: it?.qty ?? 1,
+      price: it?.price ?? 0
+    }))
+  );
+  const [taxEnabled, setTaxEnabled] = useState(initial.taxEnabled !== undefined && initial.taxEnabled !== null ? initial.taxEnabled : true);
+  const [taxRate, setTaxRate] = useState(initial.taxRate ?? 0);
+  const [notes, setNotes] = useState(initial.notes ?? "");
+  const [terms, setTerms] = useState(initial.terms ?? "");
   const [saving, setSaving] = useState(false);
 
   const totals = computeTotals(items, taxEnabled ? taxRate : 0);
@@ -1138,13 +1144,23 @@ function DocumentForm({ company, initial, onCancel, onSaved, onUpdated, onLogout
   }
 
   async function save() {
+    try {
+      await doSave();
+    } catch (e) {
+      console.error("Save failed:", e);
+      setSaving(false);
+      alert("Couldn't save: " + (e?.message || e));
+    }
+  }
+
+  async function doSave() {
     if (!clientName.trim()) {
       alert("Please add a client name before saving.");
       return;
     }
-    let cleanItems = items.filter((it) => it.desc.trim() !== "" || Number(it.price) > 0);
+    let cleanItems = items.filter((it) => String(it.desc ?? "").trim() !== "" || Number(it.price) > 0);
     if (cleanItems.length === 0) cleanItems = [{ desc: "Item", qty: 1, price: 0 }];
-    cleanItems = cleanItems.map((it) => ({ desc: it.desc, qty: Number(it.qty) || 0, price: Number(it.price) || 0 }));
+    cleanItems = cleanItems.map((it) => ({ desc: String(it.desc ?? ""), qty: Number(it.qty) || 0, price: Number(it.price) || 0 }));
 
     setSaving(true);
 
@@ -1215,7 +1231,13 @@ function DocumentForm({ company, initial, onCancel, onSaved, onUpdated, onLogout
       .single();
 
     if (initial.convertedFromId) {
-      await supabase.from("documents").update({ status: "converted" }).eq("id", initial.convertedFromId);
+      const { error: convError } = await supabase
+        .from("documents")
+        .update({ status: "converted" })
+        .eq("id", initial.convertedFromId);
+      if (convError) {
+        alert("Invoice saved, but couldn't mark the quote as converted: " + convError.message);
+      }
     }
 
     setSaving(false);
@@ -1376,7 +1398,8 @@ function DocumentForm({ company, initial, onCancel, onSaved, onUpdated, onLogout
 function DocumentView({ company, doc, onBack, onLogout, onEdit, onEditDoc, onChanged, onDeleted, onConvert }) {
   const totals = computeTotals(doc.items, doc.tax_enabled ? doc.tax_rate : 0);
   const isQuote = doc.type === "quote";
-  const statusOptions = isQuote ? ["draft", "sent", "accepted", "declined"] : ["draft", "sent", "paid"];
+  const baseStatusOptions = isQuote ? ["draft", "sent", "accepted", "declined"] : ["draft", "sent", "paid"];
+  const statusOptions = baseStatusOptions.includes(doc.status) ? baseStatusOptions : [...baseStatusOptions, doc.status];
 
   async function changeStatus(status) {
     const { data, error } = await supabase.from("documents").update({ status }).eq("id", doc.id).select().single();
@@ -2644,20 +2667,37 @@ export default function App() {
           setDocs((prev) => prev.filter((d) => d.id !== id));
           setView("dashboard");
         }}
-        onConvert={(quote) =>
-          openNewDoc("invoice", {
-            type: "invoice",
-            client: { name: quote.client_name, address: quote.client_address, email: quote.client_email },
-            issueDate: todayISO(),
-            dueDate: plusDays(todayISO(), 14),
-            items: quote.items.map((it) => ({ desc: it.desc, qty: it.qty, price: it.price })),
-            taxEnabled: quote.tax_enabled,
-            taxRate: quote.tax_rate,
-            notes: quote.notes,
-            terms: "Payment due within 14 days.",
-            convertedFromId: quote.id
-          })
-        }
+        onConvert={(quote) => {
+          try {
+            // If this quote came from a job card, link the new invoice to that job card too
+            const linkedCard = jobCards.find((jc) => jc.quote_id === quote.id);
+            openNewDoc("invoice", {
+              type: "invoice",
+              client: {
+                name: quote.client_name || "",
+                address: quote.client_address || "",
+                email: quote.client_email || ""
+              },
+              issueDate: todayISO(),
+              dueDate: plusDays(todayISO(), 14),
+              items: (Array.isArray(quote.items) ? quote.items : []).map((it) => ({
+                desc: it?.desc ?? "",
+                qty: it?.qty ?? 1,
+                price: it?.price ?? 0
+              })),
+              taxEnabled: quote.tax_enabled ?? true,
+              taxRate: quote.tax_rate ?? 0,
+              notes: quote.notes || "",
+              terms: "Payment due within 14 days.",
+              convertedFromId: quote.id,
+              linkedJobCardId: linkedCard ? linkedCard.id : undefined,
+              linkedJobCardField: linkedCard ? "invoice_id" : undefined
+            });
+          } catch (e) {
+            console.error("Convert failed:", e);
+            alert("Couldn't convert this quote: " + (e?.message || e));
+          }
+        }}
       />
     );
   }
