@@ -62,6 +62,28 @@ function boltLogoPNG() {
   return canvas.toDataURL("image/png");
 }
 
+// Hydro Electric logo: the blue water drop with yellow bolt from
+// hydroelectric.vercel.app, on a white circle so it suits the round previews.
+function hydroLogoPNG() {
+  const canvas = document.createElement("canvas");
+  canvas.width = 320;
+  canvas.height = 320;
+  const ctx = canvas.getContext("2d");
+  ctx.fillStyle = "#FFFFFF";
+  ctx.beginPath();
+  ctx.arc(160, 160, 160, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.save();
+  ctx.translate(64, 40);
+  ctx.scale(6, 6);
+  ctx.fillStyle = "#1767B0";
+  ctx.fill(new Path2D("M16 2C16 2 4 16.5 4 25a12 12 0 0 0 24 0C28 16.5 16 2 16 2z"));
+  ctx.fillStyle = "#F5B800";
+  ctx.fill(new Path2D("M18 14l-7 12h5l-2 8 7-12h-5z"));
+  ctx.restore();
+  return canvas.toDataURL("image/png");
+}
+
 // ---------------- PDF export ----------------
 function downloadPdf(doc, company) {
   const totals = computeTotals(doc.items, doc.tax_enabled ? doc.tax_rate : 0);
@@ -684,6 +706,9 @@ function LogoPicker({ value, onChange }) {
       <button type="button" className="btn btn-sm" style={{ marginTop: 8 }} onClick={() => onChange(boltLogoPNG())}>
         ⚡ Use lightning bolt icon
       </button>
+      <button type="button" className="btn btn-sm" style={{ marginTop: 8, marginLeft: 8 }} onClick={() => onChange(hydroLogoPNG())}>
+        💧 Use Hydro Electric logo
+      </button>
       {value && (
         <button
           type="button"
@@ -699,7 +724,7 @@ function LogoPicker({ value, onChange }) {
 }
 
 // ---------------- Setup screen (creates a company row) ----------------
-function Setup({ which, existingUsernames, onCreated }) {
+function Setup({ which, existingUsernames, onCreated, onCancel }) {
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [email, setEmail] = useState("");
@@ -716,7 +741,7 @@ function Setup({ which, existingUsernames, onCreated }) {
       return;
     }
     if (existingUsernames.some((u) => u.toLowerCase() === username.trim().toLowerCase())) {
-      setError("That username is already used by the other company. Pick a different one.");
+      setError("That username is already used by another company. Pick a different one.");
       return;
     }
     setSaving(true);
@@ -744,11 +769,13 @@ function Setup({ which, existingUsernames, onCreated }) {
       <Topbar company={null} />
       <div className="center-screen">
         <div className="panel" style={{ maxWidth: 440 }}>
-          <h1>Set up your {which === "A" ? "first company" : "second company"}</h1>
+          <h1>{which === "A" ? "Set up your first company" : which === "B" ? "Set up your second company" : "Add another company"}</h1>
           <p className="sub">
             {which === "A"
               ? "Let's get both companies set up. This takes a minute."
-              : "Now the second company — its documents and login stay completely separate."}
+              : which === "B"
+              ? "Now the second company — its documents and login stay completely separate."
+              : "This company gets its own login, documents and numbering, kept separate from the others."}
           </p>
           <div className="field">
             <label>Company name</label>
@@ -781,12 +808,17 @@ function Setup({ which, existingUsernames, onCreated }) {
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Choose a password" />
           </div>
           <p className="hint">
-            This keeps the two companies' data apart in the app — it isn't strong security (see the README), so don't reuse a sensitive password.
+            This keeps each company's data apart in the app — it isn't strong security (see the README), so don't reuse a sensitive password.
           </p>
           {error && <div className="error-msg">{error}</div>}
           <button className="btn btn-primary" style={{ width: "100%", marginTop: 10 }} disabled={saving} onClick={handleContinue}>
-            {saving ? "Saving…" : which === "A" ? "Continue to second company" : "Finish setup"}
+            {saving ? "Saving…" : which === "A" ? "Continue to second company" : which === "B" ? "Finish setup" : "Add company"}
           </button>
+          {onCancel && (
+            <button className="btn btn-quiet" style={{ width: "100%", marginTop: 8 }} disabled={saving} onClick={onCancel}>
+              Cancel
+            </button>
+          )}
         </div>
       </div>
     </>
@@ -794,7 +826,7 @@ function Setup({ which, existingUsernames, onCreated }) {
 }
 
 // ---------------- Login ----------------
-function Login({ companies, technicians, onLoggedIn }) {
+function Login({ companies, technicians, onLoggedIn, onAddCompany }) {
   const [picked, setPicked] = useState(null);
   const [role, setRole] = useState("admin");
   const [username, setUsername] = useState("");
@@ -821,6 +853,12 @@ function Login({ companies, technicians, onLoggedIn }) {
                   <div className="tname">{c.name}</div>
                 </button>
               ))}
+              {onAddCompany && (
+                <button className="company-tile company-tile-add" style={{ cursor: "pointer" }} onClick={onAddCompany}>
+                  <div className="logo-fallback">+</div>
+                  <div className="tname">Add another company</div>
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -2418,6 +2456,7 @@ function TechnicianManager({ company, technicians, currentUser, onLogout, onEdit
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [companies, setCompanies] = useState([]);
+  const [addingCompany, setAddingCompany] = useState(false);
   const [technicians, setTechnicians] = useState([]);
   const [session, setSession] = useState(null); // { role: 'admin'|'technician', company, technician? }
   const [docs, setDocs] = useState([]);
@@ -2570,8 +2609,29 @@ export default function App() {
     );
   }
 
+  if (!session && addingCompany) {
+    return (
+      <Setup
+        which="extra"
+        existingUsernames={companies.map((c) => c.username)}
+        onCancel={() => setAddingCompany(false)}
+        onCreated={async () => {
+          await refreshCompanies();
+          setAddingCompany(false);
+        }}
+      />
+    );
+  }
+
   if (!session) {
-    return <Login companies={companies} technicians={technicians} onLoggedIn={handleLoggedIn} />;
+    return (
+      <Login
+        companies={companies}
+        technicians={technicians}
+        onLoggedIn={handleLoggedIn}
+        onAddCompany={() => setAddingCompany(true)}
+      />
+    );
   }
 
   // Technicians can only ever reach job-card screens, regardless of what
