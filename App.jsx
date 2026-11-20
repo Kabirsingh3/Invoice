@@ -62,28 +62,6 @@ function boltLogoPNG() {
   return canvas.toDataURL("image/png");
 }
 
-// Hydro Electric logo: the blue water drop with yellow bolt from
-// hydroelectric.vercel.app, on a white circle so it suits the round previews.
-function hydroLogoPNG() {
-  const canvas = document.createElement("canvas");
-  canvas.width = 320;
-  canvas.height = 320;
-  const ctx = canvas.getContext("2d");
-  ctx.fillStyle = "#FFFFFF";
-  ctx.beginPath();
-  ctx.arc(160, 160, 160, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.save();
-  ctx.translate(64, 40);
-  ctx.scale(6, 6);
-  ctx.fillStyle = "#1767B0";
-  ctx.fill(new Path2D("M16 2C16 2 4 16.5 4 25a12 12 0 0 0 24 0C28 16.5 16 2 16 2z"));
-  ctx.fillStyle = "#F5B800";
-  ctx.fill(new Path2D("M18 14l-7 12h5l-2 8 7-12h-5z"));
-  ctx.restore();
-  return canvas.toDataURL("image/png");
-}
-
 // ---------------- PDF export ----------------
 function downloadPdf(doc, company) {
   const totals = computeTotals(doc.items, doc.tax_enabled ? doc.tax_rate : 0);
@@ -651,6 +629,184 @@ async function downloadJobCardPdf(jobCard, company) {
   }
 }
 
+// ---------------- Retainer agreement PDF ----------------
+function downloadRetainerPdf(r, company) {
+  const ACCENT = [30, 58, 95];
+  const GOLD = [156, 122, 46];
+  const INK = [20, 26, 36];
+  const INK_SOFT = [91, 100, 114];
+  const LINE = [219, 223, 217];
+  const PAPER_ALT = [228, 231, 225];
+  try {
+    const pdf = new jsPDF({ unit: "pt", format: "a4" });
+    const pageW = pdf.internal.pageSize.getWidth();
+    const pageH = pdf.internal.pageSize.getHeight();
+    const marginX = 54;
+    const contentW = pageW - marginX * 2;
+    const bottom = pageH - 56;
+
+    pdf.setFillColor(...ACCENT);
+    pdf.rect(0, 0, pageW * 0.82, 7, "F");
+    pdf.setFillColor(...GOLD);
+    pdf.rect(pageW * 0.82, 0, pageW * 0.18, 7, "F");
+
+    let y = 46;
+    let nameY = y;
+    if (company.logo) {
+      try {
+        const fmt = company.logo.includes("image/png") ? "PNG" : "JPEG";
+        pdf.addImage(company.logo, fmt, marginX, y - 8, 42, 42, undefined, "FAST");
+        nameY = y + 50;
+      } catch (e) {}
+    }
+    pdf.setFont("times", "bold");
+    pdf.setFontSize(16);
+    pdf.setTextColor(...INK);
+    pdf.text(company.name || "", marginX, nameY);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9.5);
+    pdf.setTextColor(...INK_SOFT);
+    const addrLines = pdf.splitTextToSize([company.address, company.email, company.phone].filter(Boolean).join("\n"), 250);
+    pdf.text(addrLines, marginX, nameY + 18);
+
+    pdf.setFont("times", "bold");
+    pdf.setFontSize(20);
+    pdf.setTextColor(...ACCENT);
+    pdf.text("Retainer Agreement", pageW - marginX, y + 6, { align: "right" });
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(9.5);
+    pdf.setTextColor(...INK_SOFT);
+    if (r.title) pdf.text(pdf.splitTextToSize(r.title, 220), pageW - marginX, y + 24, { align: "right" });
+
+    y = Math.max(nameY + 18 + addrLines.length * 11, y + 70) + 24;
+
+    // Key terms box
+    const clientLines = pdf.splitTextToSize([r.client_name, r.client_address, r.client_email].filter(Boolean).join("\n") || "—", contentW / 2 - 24);
+    const terms = [
+      ["Monthly fee", r.monthly_fee ? `R${money(Number(r.monthly_fee))}` : "—"],
+      ["Start date", r.start_date ? fmtDate(r.start_date) : "—"],
+      ["Term", r.term_months ? `${r.term_months} months` : "—"]
+    ];
+    const boxH = Math.max(28 + clientLines.length * 12, 28 + terms.length * 15) + 10;
+    pdf.setFillColor(...PAPER_ALT);
+    pdf.roundedRect(marginX, y - 16, contentW, boxH, 4, 4, "F");
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(8.5);
+    pdf.setTextColor(...INK_SOFT);
+    pdf.text("CLIENT", marginX + 14, y);
+    pdf.text("KEY TERMS", marginX + contentW / 2 + 6, y);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+    pdf.setTextColor(...INK);
+    pdf.text(clientLines, marginX + 14, y + 16);
+    terms.forEach(([k, v], i) => {
+      pdf.setTextColor(...INK_SOFT);
+      pdf.text(k, marginX + contentW / 2 + 6, y + 16 + i * 15);
+      pdf.setTextColor(...INK);
+      pdf.text(v, pageW - marginX - 14, y + 16 + i * 15, { align: "right" });
+    });
+    y += boxH + 14;
+
+    function ensure(h) {
+      if (y + h > bottom) {
+        pdf.addPage();
+        y = 60;
+      }
+    }
+
+    // Agreement body
+    const lines = (r.agreement_text || "").replace(/\r/g, "").split("\n");
+    for (const raw of lines) {
+      const line = raw.trimEnd();
+      if (!line.trim()) {
+        y += 6;
+        continue;
+      }
+      if (/^#{1,3}\s+/.test(line)) {
+        const text = line.replace(/^#{1,3}\s+/, "");
+        ensure(40);
+        y += 8;
+        pdf.setFont("helvetica", "bold");
+        pdf.setFontSize(10.5);
+        pdf.setTextColor(...ACCENT);
+        const hl = pdf.splitTextToSize(text, contentW);
+        pdf.text(hl, marginX, y);
+        y += hl.length * 13 + 4;
+        continue;
+      }
+      const clause = line.match(/^(\s*(?:\d+(?:\.\d+)*\.?|[a-z]\)|\([a-z0-9]+\)|-|•))\s+(.*)$/i);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(9.5);
+      pdf.setTextColor(...INK);
+      if (clause) {
+        const label = clause[1].trim() === "-" ? "•" : clause[1].trim();
+        const indent = label.length > 4 ? 34 : 26;
+        const wrapped = pdf.splitTextToSize(clause[2], contentW - indent);
+        for (let i = 0; i < wrapped.length; i++) {
+          ensure(13);
+          if (i === 0) pdf.text(label, marginX, y);
+          pdf.text(wrapped[i], marginX + indent, y);
+          y += 12.5;
+        }
+      } else {
+        const wrapped = pdf.splitTextToSize(line.trim(), contentW);
+        for (const w of wrapped) {
+          ensure(13);
+          pdf.text(w, marginX, y);
+          y += 12.5;
+        }
+      }
+      y += 2;
+    }
+
+    // Signatures
+    ensure(170);
+    y += 24;
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(10.5);
+    pdf.setTextColor(...ACCENT);
+    pdf.text("Signatures", marginX, y);
+    y += 30;
+    const colW = (contentW - 40) / 2;
+    [
+      ["For the Service Provider", company.name || "", marginX],
+      ["For the Client", r.client_name || "", marginX + colW + 40]
+    ].forEach(([heading, party, x]) => {
+      pdf.setFont("helvetica", "bold");
+      pdf.setFontSize(9);
+      pdf.setTextColor(...INK);
+      pdf.text(heading, x, y);
+      pdf.setFont("helvetica", "normal");
+      pdf.setTextColor(...INK_SOFT);
+      pdf.text(pdf.splitTextToSize(party, colW)[0] || "", x, y + 13);
+      pdf.setDrawColor(...LINE);
+      pdf.setLineWidth(0.75);
+      ["Signature", "Full name", "Date"].forEach((lbl, i) => {
+        const ly = y + 50 + i * 34;
+        pdf.line(x, ly, x + colW, ly);
+        pdf.setFontSize(8.5);
+        pdf.text(lbl, x, ly + 11);
+      });
+    });
+
+    // Page numbers
+    const pages = pdf.internal.getNumberOfPages();
+    for (let i = 1; i <= pages; i++) {
+      pdf.setPage(i);
+      pdf.setFont("helvetica", "normal");
+      pdf.setFontSize(8);
+      pdf.setTextColor(...INK_SOFT);
+      pdf.text(`Page ${i} of ${pages}   ·   Initials: ______  ______`, pageW / 2, pageH - 24, { align: "center" });
+    }
+
+    const safeClient = (r.client_name || "client").replace(/[^a-zA-Z0-9_-]+/g, "_");
+    pdf.save(`Retainer_${safeClient}_${r.start_date || todayISO()}.pdf`);
+  } catch (err) {
+    console.error(err);
+    alert("Couldn't generate the agreement PDF. Please try again.");
+  }
+}
+
 // ---------------- Topbar ----------------
 function Topbar({ company, onLogout, onEdit, subtitle }) {
   return (
@@ -706,9 +862,6 @@ function LogoPicker({ value, onChange }) {
       <button type="button" className="btn btn-sm" style={{ marginTop: 8 }} onClick={() => onChange(boltLogoPNG())}>
         ⚡ Use lightning bolt icon
       </button>
-      <button type="button" className="btn btn-sm" style={{ marginTop: 8, marginLeft: 8 }} onClick={() => onChange(hydroLogoPNG())}>
-        💧 Use Hydro Electric logo
-      </button>
       {value && (
         <button
           type="button"
@@ -724,7 +877,7 @@ function LogoPicker({ value, onChange }) {
 }
 
 // ---------------- Setup screen (creates a company row) ----------------
-function Setup({ which, existingUsernames, onCreated, onCancel }) {
+function Setup({ which, existingUsernames, onCreated }) {
   const [name, setName] = useState("");
   const [address, setAddress] = useState("");
   const [email, setEmail] = useState("");
@@ -741,7 +894,7 @@ function Setup({ which, existingUsernames, onCreated, onCancel }) {
       return;
     }
     if (existingUsernames.some((u) => u.toLowerCase() === username.trim().toLowerCase())) {
-      setError("That username is already used by another company. Pick a different one.");
+      setError("That username is already used by the other company. Pick a different one.");
       return;
     }
     setSaving(true);
@@ -769,13 +922,11 @@ function Setup({ which, existingUsernames, onCreated, onCancel }) {
       <Topbar company={null} />
       <div className="center-screen">
         <div className="panel" style={{ maxWidth: 440 }}>
-          <h1>{which === "A" ? "Set up your first company" : which === "B" ? "Set up your second company" : "Add another company"}</h1>
+          <h1>Set up your {which === "A" ? "first company" : "second company"}</h1>
           <p className="sub">
             {which === "A"
               ? "Let's get both companies set up. This takes a minute."
-              : which === "B"
-              ? "Now the second company — its documents and login stay completely separate."
-              : "This company gets its own login, documents and numbering, kept separate from the others."}
+              : "Now the second company — its documents and login stay completely separate."}
           </p>
           <div className="field">
             <label>Company name</label>
@@ -808,17 +959,12 @@ function Setup({ which, existingUsernames, onCreated, onCancel }) {
             <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} placeholder="Choose a password" />
           </div>
           <p className="hint">
-            This keeps each company's data apart in the app — it isn't strong security (see the README), so don't reuse a sensitive password.
+            This keeps the two companies' data apart in the app — it isn't strong security (see the README), so don't reuse a sensitive password.
           </p>
           {error && <div className="error-msg">{error}</div>}
           <button className="btn btn-primary" style={{ width: "100%", marginTop: 10 }} disabled={saving} onClick={handleContinue}>
-            {saving ? "Saving…" : which === "A" ? "Continue to second company" : which === "B" ? "Finish setup" : "Add company"}
+            {saving ? "Saving…" : which === "A" ? "Continue to second company" : "Finish setup"}
           </button>
-          {onCancel && (
-            <button className="btn btn-quiet" style={{ width: "100%", marginTop: 8 }} disabled={saving} onClick={onCancel}>
-              Cancel
-            </button>
-          )}
         </div>
       </div>
     </>
@@ -826,7 +972,7 @@ function Setup({ which, existingUsernames, onCreated, onCancel }) {
 }
 
 // ---------------- Login ----------------
-function Login({ companies, technicians, onLoggedIn, onAddCompany }) {
+function Login({ companies, technicians, onLoggedIn }) {
   const [picked, setPicked] = useState(null);
   const [role, setRole] = useState("admin");
   const [username, setUsername] = useState("");
@@ -853,12 +999,6 @@ function Login({ companies, technicians, onLoggedIn, onAddCompany }) {
                   <div className="tname">{c.name}</div>
                 </button>
               ))}
-              {onAddCompany && (
-                <button className="company-tile company-tile-add" style={{ cursor: "pointer" }} onClick={onAddCompany}>
-                  <div className="logo-fallback">+</div>
-                  <div className="tname">Add another company</div>
-                </button>
-              )}
             </div>
           </div>
         </div>
@@ -1063,7 +1203,8 @@ let currentUserIsSuperAdmin = false;
 function AdminTabs({ active, onChange }) {
   const tabs = [
     ["documents", "Quotes & Invoices"],
-    ["jobcards", "Job Cards"]
+    ["jobcards", "Job Cards"],
+    ["retainers", "Retainers"]
   ];
   if (currentUserIsSuperAdmin) tabs.push(["technicians", "Users"]);
   return (
@@ -1151,22 +1292,16 @@ function Dashboard({ company, docs, onLogout, onEdit, onNew, onOpen, filter, set
 function DocumentForm({ company, initial, onCancel, onSaved, onUpdated, onLogout, onEdit }) {
   const isEditing = !!initial.editingId;
   const [type, setType] = useState(initial.type);
-  const [clientName, setClientName] = useState(initial.client?.name ?? "");
-  const [clientEmail, setClientEmail] = useState(initial.client?.email ?? "");
-  const [clientAddress, setClientAddress] = useState(initial.client?.address ?? "");
-  const [issueDate, setIssueDate] = useState(initial.issueDate || todayISO());
-  const [dueDate, setDueDate] = useState(initial.dueDate || plusDays(todayISO(), 14));
-  const [items, setItems] = useState(
-    (initial.items && initial.items.length ? initial.items : [{ desc: "", qty: 1, price: 0 }]).map((it) => ({
-      desc: it?.desc ?? "",
-      qty: it?.qty ?? 1,
-      price: it?.price ?? 0
-    }))
-  );
-  const [taxEnabled, setTaxEnabled] = useState(initial.taxEnabled !== undefined && initial.taxEnabled !== null ? initial.taxEnabled : true);
-  const [taxRate, setTaxRate] = useState(initial.taxRate ?? 0);
-  const [notes, setNotes] = useState(initial.notes ?? "");
-  const [terms, setTerms] = useState(initial.terms ?? "");
+  const [clientName, setClientName] = useState(initial.client.name);
+  const [clientEmail, setClientEmail] = useState(initial.client.email);
+  const [clientAddress, setClientAddress] = useState(initial.client.address);
+  const [issueDate, setIssueDate] = useState(initial.issueDate);
+  const [dueDate, setDueDate] = useState(initial.dueDate);
+  const [items, setItems] = useState(initial.items);
+  const [taxEnabled, setTaxEnabled] = useState(initial.taxEnabled !== undefined ? initial.taxEnabled : true);
+  const [taxRate, setTaxRate] = useState(initial.taxRate);
+  const [notes, setNotes] = useState(initial.notes);
+  const [terms, setTerms] = useState(initial.terms);
   const [saving, setSaving] = useState(false);
 
   const totals = computeTotals(items, taxEnabled ? taxRate : 0);
@@ -1182,23 +1317,13 @@ function DocumentForm({ company, initial, onCancel, onSaved, onUpdated, onLogout
   }
 
   async function save() {
-    try {
-      await doSave();
-    } catch (e) {
-      console.error("Save failed:", e);
-      setSaving(false);
-      alert("Couldn't save: " + (e?.message || e));
-    }
-  }
-
-  async function doSave() {
     if (!clientName.trim()) {
       alert("Please add a client name before saving.");
       return;
     }
-    let cleanItems = items.filter((it) => String(it.desc ?? "").trim() !== "" || Number(it.price) > 0);
+    let cleanItems = items.filter((it) => it.desc.trim() !== "" || Number(it.price) > 0);
     if (cleanItems.length === 0) cleanItems = [{ desc: "Item", qty: 1, price: 0 }];
-    cleanItems = cleanItems.map((it) => ({ desc: String(it.desc ?? ""), qty: Number(it.qty) || 0, price: Number(it.price) || 0 }));
+    cleanItems = cleanItems.map((it) => ({ desc: it.desc, qty: Number(it.qty) || 0, price: Number(it.price) || 0 }));
 
     setSaving(true);
 
@@ -1269,13 +1394,7 @@ function DocumentForm({ company, initial, onCancel, onSaved, onUpdated, onLogout
       .single();
 
     if (initial.convertedFromId) {
-      const { error: convError } = await supabase
-        .from("documents")
-        .update({ status: "converted" })
-        .eq("id", initial.convertedFromId);
-      if (convError) {
-        alert("Invoice saved, but couldn't mark the quote as converted: " + convError.message);
-      }
+      await supabase.from("documents").update({ status: "converted" }).eq("id", initial.convertedFromId);
     }
 
     setSaving(false);
@@ -1436,8 +1555,7 @@ function DocumentForm({ company, initial, onCancel, onSaved, onUpdated, onLogout
 function DocumentView({ company, doc, onBack, onLogout, onEdit, onEditDoc, onChanged, onDeleted, onConvert }) {
   const totals = computeTotals(doc.items, doc.tax_enabled ? doc.tax_rate : 0);
   const isQuote = doc.type === "quote";
-  const baseStatusOptions = isQuote ? ["draft", "sent", "accepted", "declined"] : ["draft", "sent", "paid"];
-  const statusOptions = baseStatusOptions.includes(doc.status) ? baseStatusOptions : [...baseStatusOptions, doc.status];
+  const statusOptions = isQuote ? ["draft", "sent", "accepted", "declined"] : ["draft", "sent", "paid"];
 
   async function changeStatus(status) {
     const { data, error } = await supabase.from("documents").update({ status }).eq("id", doc.id).select().single();
@@ -2452,15 +2570,401 @@ function TechnicianManager({ company, technicians, currentUser, onLogout, onEdit
   );
 }
 
+// ---------------- Retainers (admin only) ----------------
+const RETAINER_STATUS = { draft: "Draft", active: "Active", ended: "Ended" };
+const RETAINER_PILL = { draft: "status-draft", active: "status-paid", ended: "status-declined" };
+
+function newRetainer(companyId) {
+  const id = typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : String(Date.now());
+  return {
+    id,
+    company_id: companyId,
+    isNew: true,
+    title: "",
+    client_name: "",
+    client_address: "",
+    client_email: "",
+    status: "draft",
+    monthly_fee: 0,
+    start_date: todayISO(),
+    term_months: 12,
+    agreement_text: "",
+    chat: []
+  };
+}
+
+function RetainerList({ company, retainers, onLogout, onEdit, onSection, onNew, onOpen }) {
+  const list = retainers.slice().sort((a, b) => new Date(b.updated_at || b.created_at) - new Date(a.updated_at || a.created_at));
+  const activeTotal = retainers.filter((r) => r.status === "active").reduce((sum, r) => sum + Number(r.monthly_fee || 0), 0);
+  return (
+    <>
+      <Topbar company={company} onLogout={onLogout} onEdit={onEdit} />
+      <div className="container">
+        <AdminTabs active="retainers" onChange={onSection} />
+        <div className="toolbar">
+          <div className="hint" style={{ margin: 0 }}>
+            Active retainers: <b>R{money(activeTotal)}</b> per month
+          </div>
+          <button className="btn btn-primary" onClick={onNew}>
+            + New retainer
+          </button>
+        </div>
+        {list.length === 0 ? (
+          <div className="empty-state">
+            <div className="big">No retainers yet</div>
+            <div>Tap “New retainer” and let the AI assistant help you price it and write the agreement.</div>
+          </div>
+        ) : (
+          <div className="doclist-wrap">
+            <table className="doclist">
+              <thead>
+                <tr>
+                  <th>Client</th>
+                  <th>Start</th>
+                  <th>Status</th>
+                  <th style={{ textAlign: "right" }}>Per month</th>
+                </tr>
+              </thead>
+              <tbody>
+                {list.map((r) => (
+                  <tr key={r.id} className="row" onClick={() => onOpen(r)}>
+                    <td>
+                      {r.client_name || "(no client yet)"}
+                      {r.title && <div className="hint" style={{ margin: 0, fontSize: 12 }}>{r.title}</div>}
+                    </td>
+                    <td>{r.start_date ? fmtDate(r.start_date) : "—"}</td>
+                    <td>
+                      <span className={`status-pill ${RETAINER_PILL[r.status] || "status-draft"}`}>{RETAINER_STATUS[r.status] || r.status}</span>
+                    </td>
+                    <td className="amt-cell">R{money(Number(r.monthly_fee || 0))}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    </>
+  );
+}
+
+function RetainerEditor({ company, initial, aiAuth, onLogout, onEdit, onBack, onSaved, onDeleted, onCreateInvoice }) {
+  const [r, setR] = useState(initial);
+  const [dirty, setDirty] = useState(!!initial.isNew);
+  const [saving, setSaving] = useState(false);
+  const [input, setInput] = useState("");
+  const [thinking, setThinking] = useState(false);
+  const [aiError, setAiError] = useState("");
+  const chatEndRef = useRef(null);
+  const chat = r.chat || [];
+
+  useEffect(() => {
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [chat.length, thinking]);
+
+  function update(fields) {
+    setR((prev) => ({ ...prev, ...fields }));
+    setDirty(true);
+  }
+
+  async function save(record = r, quiet = false) {
+    setSaving(true);
+    const payload = {
+      id: record.id,
+      company_id: company.id,
+      title: record.title || "",
+      client_name: record.client_name || "",
+      client_address: record.client_address || "",
+      client_email: record.client_email || "",
+      status: record.status || "draft",
+      monthly_fee: Number(record.monthly_fee) || 0,
+      start_date: record.start_date || null,
+      term_months: record.term_months ? parseInt(record.term_months, 10) : null,
+      agreement_text: record.agreement_text || "",
+      chat: record.chat || [],
+      updated_at: new Date().toISOString()
+    };
+    const { data, error } = await supabase.from("retainers").upsert(payload).select().single();
+    setSaving(false);
+    if (error) {
+      alert(
+        "Couldn't save: " +
+          error.message +
+          (error.message.includes("retainers") ? "\n\nRun the retainers SQL migration in Supabase first." : "")
+      );
+      return null;
+    }
+    setR((prev) => ({ ...prev, ...data, isNew: false }));
+    setDirty(false);
+    onSaved(data, quiet);
+    return data;
+  }
+
+  async function send() {
+    const text = input.trim();
+    if (!text || thinking) return;
+    setAiError("");
+    const userMsg = { role: "user", content: text, at: new Date().toISOString() };
+    const nextChat = [...chat, userMsg];
+    const current = { ...r, chat: nextChat };
+    setR(current);
+    setInput("");
+    setThinking(true);
+    try {
+      const res = await fetch("/api/retainer-ai", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          auth: aiAuth,
+          company: { name: company.name, address: company.address, email: company.email, phone: company.phone },
+          retainer: current,
+          messages: nextChat.map((m) => ({ role: m.role, content: m.content }))
+        })
+      });
+      let data = null;
+      try {
+        data = await res.json();
+      } catch (e) {
+        throw new Error(res.status === 404 ? "The AI function isn't deployed yet (api/retainer-ai.js missing on Vercel)." : "Unexpected reply from the server (" + res.status + ").");
+      }
+      if (!res.ok) throw new Error(data?.error || "AI request failed (" + res.status + ")");
+
+      const changes = {};
+      const f = data.fields || {};
+      ["title", "client_name", "client_address", "client_email", "start_date"].forEach((k) => {
+        if (typeof f[k] === "string" && f[k].trim()) changes[k] = f[k].trim();
+      });
+      if (typeof f.monthly_fee === "number" && f.monthly_fee >= 0) changes.monthly_fee = f.monthly_fee;
+      if (Number.isInteger(f.term_months) && f.term_months > 0) changes.term_months = f.term_months;
+      if (typeof data.agreement_text === "string" && data.agreement_text.trim()) changes.agreement_text = data.agreement_text.trim();
+
+      const notes = [];
+      if (Object.keys(changes).some((k) => k !== "agreement_text")) notes.push("updated the details");
+      if (changes.agreement_text) notes.push(r.agreement_text ? "updated the agreement" : "drafted the agreement");
+      const aiMsg = {
+        role: "assistant",
+        content: data.reply || "(no reply)",
+        note: notes.length ? "✓ " + notes.join(" and ") : "",
+        at: new Date().toISOString()
+      };
+      const updated = { ...current, ...changes, chat: [...nextChat, aiMsg] };
+      setR(updated);
+      // Save straight away so nothing from the conversation is lost.
+      await save(updated, true);
+    } catch (err) {
+      setAiError(err.message || String(err));
+      setDirty(true);
+    } finally {
+      setThinking(false);
+    }
+  }
+
+  async function handleDelete() {
+    if (r.isNew) {
+      onBack();
+      return;
+    }
+    if (!confirm("Delete this retainer and its agreement?")) return;
+    const { error } = await supabase.from("retainers").delete().eq("id", r.id);
+    if (error) {
+      alert("Couldn't delete: " + error.message);
+      return;
+    }
+    onDeleted(r.id);
+  }
+
+  function back() {
+    if (dirty && !confirm("You have unsaved changes. Leave without saving?")) return;
+    onBack();
+  }
+
+  const starters = [
+    "Work out a monthly retainer for a body corporate with 3 blocks",
+    "Help me price maintenance for a small business",
+    "Write the agreement using the details below"
+  ];
+
+  return (
+    <>
+      <Topbar company={company} onLogout={onLogout} onEdit={onEdit} />
+      <div className="container">
+        <div className="doc-actions">
+          <div className="doc-actions-left">
+            <button className="btn btn-quiet btn-sm" onClick={back}>
+              ← Back
+            </button>
+          </div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <button className="btn btn-sm btn-primary" disabled={saving} onClick={() => save()}>
+              {saving ? "Saving…" : dirty ? "Save" : "Saved"}
+            </button>
+            <button className="btn btn-sm" disabled={!r.agreement_text} onClick={() => downloadRetainerPdf(r, company)}>
+              Download PDF
+            </button>
+            <button
+              className="btn btn-sm"
+              disabled={!r.client_name || !Number(r.monthly_fee)}
+              onClick={() => onCreateInvoice(r)}
+            >
+              Create monthly invoice
+            </button>
+            <button className="btn btn-sm btn-danger" onClick={handleDelete}>
+              Delete
+            </button>
+          </div>
+        </div>
+
+        {/* AI assistant */}
+        <div className="form-section">
+          <h3>AI assistant</h3>
+          <p className="hint" style={{ marginTop: 0 }}>
+            Tell it about the client and the work. It will ask what it needs, work out the monthly fee, and write the agreement for you.
+          </p>
+          <div
+            style={{
+              maxHeight: "55vh",
+              overflowY: "auto",
+              display: "flex",
+              flexDirection: "column",
+              gap: 10,
+              padding: chat.length ? "4px 0 10px" : 0
+            }}
+          >
+            {chat.map((m, i) => (
+              <div
+                key={i}
+                style={{
+                  alignSelf: m.role === "user" ? "flex-end" : "flex-start",
+                  maxWidth: "88%",
+                  background: m.role === "user" ? "var(--accent, #1e3a5f)" : "var(--paper-alt, #e4e7e1)",
+                  color: m.role === "user" ? "#fff" : "var(--ink, #141a24)",
+                  borderRadius: 12,
+                  padding: "9px 12px",
+                  fontSize: 14,
+                  lineHeight: 1.45,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word"
+                }}
+              >
+                {m.content}
+                {m.note && <div style={{ marginTop: 6, fontSize: 12, fontWeight: 600, opacity: 0.75 }}>{m.note}</div>}
+              </div>
+            ))}
+            {thinking && <div className="hint" style={{ margin: 0 }}>Thinking… (drafting a full agreement can take up to a minute)</div>}
+            <div ref={chatEndRef} />
+          </div>
+          {chat.length === 0 && (
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
+              {starters.map((s) => (
+                <button key={s} className="chip" onClick={() => setInput(s)}>
+                  {s}
+                </button>
+              ))}
+            </div>
+          )}
+          {aiError && <div className="error-msg" style={{ marginBottom: 10 }}>{aiError}</div>}
+          <div className="field" style={{ marginBottom: 8 }}>
+            <textarea
+              rows={3}
+              value={input}
+              placeholder="e.g. Body corporate in Midrand, 40 units, wants 1 maintenance visit a month and up to 2 emergency call-outs…"
+              onChange={(e) => setInput(e.target.value)}
+            />
+          </div>
+          <button className="btn btn-primary" disabled={thinking || !input.trim()} onClick={send}>
+            {thinking ? "Thinking…" : "Send"}
+          </button>
+        </div>
+
+        {/* Details */}
+        <div className="form-section">
+          <h3>Details</h3>
+          <div className="field">
+            <label>Title</label>
+            <input value={r.title || ""} onChange={(e) => update({ title: e.target.value })} placeholder="e.g. Monthly electrical maintenance" />
+          </div>
+          <div className="field">
+            <label>Client name</label>
+            <input value={r.client_name || ""} onChange={(e) => update({ client_name: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Client address</label>
+            <textarea rows={2} value={r.client_address || ""} onChange={(e) => update({ client_address: e.target.value })} />
+          </div>
+          <div className="field">
+            <label>Client email</label>
+            <input type="email" value={r.client_email || ""} onChange={(e) => update({ client_email: e.target.value })} />
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label>Monthly fee (R)</label>
+              <input
+                type="number"
+                min="0"
+                step="0.01"
+                value={r.monthly_fee ?? ""}
+                onChange={(e) => update({ monthly_fee: e.target.value === "" ? "" : Number(e.target.value) })}
+              />
+            </div>
+            <div className="field">
+              <label>Term (months)</label>
+              <input
+                type="number"
+                min="1"
+                value={r.term_months ?? ""}
+                onChange={(e) => update({ term_months: e.target.value === "" ? "" : parseInt(e.target.value, 10) })}
+              />
+            </div>
+          </div>
+          <div className="field-row">
+            <div className="field">
+              <label>Start date</label>
+              <input type="date" value={r.start_date || ""} onChange={(e) => update({ start_date: e.target.value })} />
+            </div>
+            <div className="field">
+              <label>Status</label>
+              <select value={r.status || "draft"} onChange={(e) => update({ status: e.target.value })}>
+                {Object.entries(RETAINER_STATUS).map(([k, label]) => (
+                  <option key={k} value={k}>
+                    {label}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+        </div>
+
+        {/* Agreement */}
+        <div className="form-section">
+          <h3>Agreement</h3>
+          <p className="hint" style={{ marginTop: 0 }}>
+            The AI fills this in. You can also edit it yourself. Headings start with “## ”. Have your main template checked by a lawyer once before using it with clients.
+          </p>
+          <div className="field" style={{ marginBottom: 0 }}>
+            <textarea
+              rows={18}
+              value={r.agreement_text || ""}
+              onChange={(e) => update({ agreement_text: e.target.value })}
+              style={{ fontSize: 13, lineHeight: 1.5 }}
+              placeholder="Ask the AI assistant to draft the agreement, or type it here."
+            />
+          </div>
+        </div>
+      </div>
+    </>
+  );
+}
+
 // ---------------- App ----------------
 export default function App() {
   const [loading, setLoading] = useState(true);
   const [companies, setCompanies] = useState([]);
-  const [addingCompany, setAddingCompany] = useState(false);
   const [technicians, setTechnicians] = useState([]);
   const [session, setSession] = useState(null); // { role: 'admin'|'technician', company, technician? }
   const [docs, setDocs] = useState([]);
   const [jobCards, setJobCards] = useState([]);
+  const [retainers, setRetainers] = useState([]);
+  const [currentRetainer, setCurrentRetainer] = useState(null);
   const [view, setView] = useState("login");
   const [currentDoc, setCurrentDoc] = useState(null);
   const [formInitial, setFormInitial] = useState(null);
@@ -2502,6 +3006,11 @@ export default function App() {
     if (!error) setDocs(data || []);
   }
 
+  async function loadRetainers(companyId) {
+    const { data, error } = await supabase.from("retainers").select("*").eq("company_id", companyId);
+    if (!error) setRetainers(data || []);
+  }
+
   async function loadJobCards(companyId) {
     const { data, error } = await supabase.from("job_cards").select("*").eq("company_id", companyId);
     if (!error) setJobCards(data || []);
@@ -2512,6 +3021,7 @@ export default function App() {
     await loadJobCards(sessionObj.company.id);
     if (sessionObj.role === "admin") {
       await loadDocs(sessionObj.company.id);
+      loadRetainers(sessionObj.company.id);
       setFilter("all");
       setView("dashboard");
     } else {
@@ -2521,6 +3031,8 @@ export default function App() {
 
   function handleLogout() {
     setSession(null);
+    setRetainers([]);
+    setCurrentRetainer(null);
     setDocs([]);
     setJobCards([]);
     setView("login");
@@ -2609,34 +3121,72 @@ export default function App() {
     );
   }
 
-  if (!session && addingCompany) {
-    return (
-      <Setup
-        which="extra"
-        existingUsernames={companies.map((c) => c.username)}
-        onCancel={() => setAddingCompany(false)}
-        onCreated={async () => {
-          await refreshCompanies();
-          setAddingCompany(false);
-        }}
-      />
-    );
-  }
-
   if (!session) {
-    return (
-      <Login
-        companies={companies}
-        technicians={technicians}
-        onLoggedIn={handleLoggedIn}
-        onAddCompany={() => setAddingCompany(true)}
-      />
-    );
+    return <Login companies={companies} technicians={technicians} onLoggedIn={handleLoggedIn} />;
   }
 
   // Technicians can only ever reach job-card screens, regardless of what
   // view state may have been left over from before.
   const effectiveView = isAdmin ? view : view.startsWith("jobcard") ? view : "jobcards";
+
+  if (effectiveView === "retainers" && isAdmin) {
+    return (
+      <RetainerList
+        company={company}
+        retainers={retainers}
+        onLogout={handleLogout}
+        onEdit={() => setView("settings")}
+        onSection={goSection}
+        onNew={() => {
+          setCurrentRetainer(newRetainer(company.id));
+          setView("retainer-edit");
+        }}
+        onOpen={(r) => {
+          setCurrentRetainer(r);
+          setView("retainer-edit");
+        }}
+      />
+    );
+  }
+
+  if (effectiveView === "retainer-edit" && currentRetainer && isAdmin) {
+    const aiAuth = session.user
+      ? { companyId: company.id, username: session.user.username, password: session.user.password }
+      : { companyId: company.id, username: company.username, password: company.password };
+    return (
+      <RetainerEditor
+        key={currentRetainer.id}
+        company={company}
+        initial={currentRetainer}
+        aiAuth={aiAuth}
+        onLogout={handleLogout}
+        onEdit={() => setView("settings")}
+        onBack={() => setView("retainers")}
+        onSaved={(saved) => {
+          setRetainers((prev) => (prev.some((x) => x.id === saved.id) ? prev.map((x) => (x.id === saved.id ? saved : x)) : [...prev, saved]));
+          setCurrentRetainer(saved);
+        }}
+        onDeleted={(id) => {
+          setRetainers((prev) => prev.filter((x) => x.id !== id));
+          setCurrentRetainer(null);
+          setView("retainers");
+        }}
+        onCreateInvoice={(r) => {
+          const month = new Date().toLocaleDateString("en-ZA", { month: "long", year: "numeric" });
+          openNewDoc("invoice", {
+            type: "invoice",
+            client: { name: r.client_name || "", address: r.client_address || "", email: r.client_email || "" },
+            issueDate: todayISO(),
+            dueDate: plusDays(todayISO(), 14),
+            items: [{ desc: `${r.title || "Monthly retainer"} – ${month}`, qty: 1, price: Number(r.monthly_fee) || 0 }],
+            taxRate: 0,
+            notes: "",
+            terms: "Payment due within 14 days."
+          });
+        }}
+      />
+    );
+  }
 
   if (effectiveView === "settings" && isAdmin) {
     return (
@@ -2727,37 +3277,20 @@ export default function App() {
           setDocs((prev) => prev.filter((d) => d.id !== id));
           setView("dashboard");
         }}
-        onConvert={(quote) => {
-          try {
-            // If this quote came from a job card, link the new invoice to that job card too
-            const linkedCard = jobCards.find((jc) => jc.quote_id === quote.id);
-            openNewDoc("invoice", {
-              type: "invoice",
-              client: {
-                name: quote.client_name || "",
-                address: quote.client_address || "",
-                email: quote.client_email || ""
-              },
-              issueDate: todayISO(),
-              dueDate: plusDays(todayISO(), 14),
-              items: (Array.isArray(quote.items) ? quote.items : []).map((it) => ({
-                desc: it?.desc ?? "",
-                qty: it?.qty ?? 1,
-                price: it?.price ?? 0
-              })),
-              taxEnabled: quote.tax_enabled ?? true,
-              taxRate: quote.tax_rate ?? 0,
-              notes: quote.notes || "",
-              terms: "Payment due within 14 days.",
-              convertedFromId: quote.id,
-              linkedJobCardId: linkedCard ? linkedCard.id : undefined,
-              linkedJobCardField: linkedCard ? "invoice_id" : undefined
-            });
-          } catch (e) {
-            console.error("Convert failed:", e);
-            alert("Couldn't convert this quote: " + (e?.message || e));
-          }
-        }}
+        onConvert={(quote) =>
+          openNewDoc("invoice", {
+            type: "invoice",
+            client: { name: quote.client_name, address: quote.client_address, email: quote.client_email },
+            issueDate: todayISO(),
+            dueDate: plusDays(todayISO(), 14),
+            items: quote.items.map((it) => ({ desc: it.desc, qty: it.qty, price: it.price })),
+            taxEnabled: quote.tax_enabled,
+            taxRate: quote.tax_rate,
+            notes: quote.notes,
+            terms: "Payment due within 14 days.",
+            convertedFromId: quote.id
+          })
+        }
       />
     );
   }

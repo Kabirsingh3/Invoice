@@ -170,3 +170,34 @@ alter table job_cards add column if not exists photos_removed_at timestamptz, ad
 -- The company's main login is always a super admin. Safe to run multiple times.
 -- ---------------------------------------------------------------------
 alter table technicians add column if not exists role text not null default 'technician' check (role in ('technician', 'admin', 'super_admin'));
+
+-- ---------------------------------------------------------------------
+-- MIGRATION: Retainers (monthly maintenance agreements, admin only in the
+-- app) with the AI assistant's conversation. Safe to run multiple times.
+-- ---------------------------------------------------------------------
+create table if not exists retainers (
+  id uuid primary key default gen_random_uuid(),
+  company_id uuid not null references companies(id) on delete cascade,
+  title text default '',
+  client_name text default '',
+  client_address text default '',
+  client_email text default '',
+  status text not null default 'draft', -- draft, active, ended
+  monthly_fee numeric not null default 0,
+  start_date date,
+  term_months integer default 12,
+  agreement_text text default '',
+  chat jsonb not null default '[]',
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now()
+);
+alter table retainers enable row level security;
+drop policy if exists "public read retainers" on retainers;
+drop policy if exists "public insert retainers" on retainers;
+drop policy if exists "public update retainers" on retainers;
+drop policy if exists "public delete retainers" on retainers;
+create policy "public read retainers" on retainers for select using (true);
+create policy "public insert retainers" on retainers for insert with check (true);
+create policy "public update retainers" on retainers for update using (true);
+create policy "public delete retainers" on retainers for delete using (true);
+grant select, insert, update, delete on retainers to anon, authenticated;
