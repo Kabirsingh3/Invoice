@@ -869,12 +869,266 @@ function ThemeToggle({ className = "tb-btn" }) {
   );
 }
 
+// ---------------- Install the app (phone home screen / desktop) ----------------
+let deferredInstall = null;
+const installListeners = new Set();
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredInstall = e;
+    installListeners.forEach((fn) => fn());
+  });
+  window.addEventListener("appinstalled", () => {
+    deferredInstall = null;
+    installListeners.forEach((fn) => fn());
+  });
+}
+function isStandalone() {
+  return (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+}
+function isIOS() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+
+function InstallButton({ className = "tb-btn", label = "Install app" }) {
+  const [, force] = useState(0);
+  const [help, setHelp] = useState(false);
+  useEffect(() => {
+    const fn = () => force((x) => x + 1);
+    installListeners.add(fn);
+    return () => installListeners.delete(fn);
+  }, []);
+  if (isStandalone()) return null;
+  const ios = isIOS();
+  if (!deferredInstall && !ios) return null;
+  async function install() {
+    if (deferredInstall) {
+      deferredInstall.prompt();
+      try {
+        await deferredInstall.userChoice;
+      } catch (e) {}
+      deferredInstall = null;
+      force((x) => x + 1);
+    } else {
+      setHelp(true);
+    }
+  }
+  return (
+    <>
+      <button className={`${className} install-btn`} onClick={install} title="Install Jobflow on this device">
+        <span aria-hidden="true">⬇</span> <span className="install-label">{label}</span>
+      </button>
+      {help && (
+        <div className="install-help" role="dialog" aria-label="Install on iPhone" onClick={() => setHelp(false)}>
+          <div className="install-card" onClick={(e) => e.stopPropagation()}>
+            <JobflowLogo size={48} />
+            <h3>Install Jobflow</h3>
+            <ol>
+              <li>Tap the <b>Share</b> button in Safari (the square with an arrow).</li>
+              <li>Scroll down and tap <b>Add to Home Screen</b>.</li>
+              <li>Tap <b>Add</b>. Jobflow appears on your home screen like a normal app.</li>
+            </ol>
+            <button className="btn btn-primary" onClick={() => setHelp(false)}>
+              Got it
+            </button>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ---------------- Sign-in layout: brand panel with rotating messages ----------------
 const AUTH_SLIDES = [
   ["Quote, job, invoice — done", "Send professional quotes and invoices in minutes, and turn an accepted quote into an invoice with one tap."],
   ["Job cards from site", "Technicians log the work, spares, photos and hardware receipts on their phones. Download a clean PDF job card."],
   ["Retainers made easy", "The AI assistant prices monthly maintenance contracts and writes the agreement for you."]
 ];
+
+// Live background for the sign-in panel: a cable with current pulsing along
+// it and sparks flying off, plus water droplets falling and splashing.
+// Drawn on a canvas; pauses when hidden and switches off for reduced motion.
+function AuthFx() {
+  const ref = useRef(null);
+  useEffect(() => {
+    const canvas = ref.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const reduce = window.matchMedia && window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    let w = 0, h = 0, dpr = 1, raf = 0, last = performance.now();
+    let drops = [], parts = [], ripples = [], flashes = [], arcs = [], motes = [];
+    let nextDrop = 0, nextSpark = 500, nextArc = 1200;
+    const pulses = [0, 0.6];
+
+    function resize() {
+      const r = canvas.getBoundingClientRect();
+      dpr = Math.min(window.devicePixelRatio || 1, 2);
+      w = r.width; h = r.height;
+      canvas.width = Math.round(w * dpr); canvas.height = Math.round(h * dpr);
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      // floating motes spread over the whole panel
+      motes = Array.from({ length: Math.round((w * h) / 4200) }, () => newMote(true));
+    }
+    function newMote(anywhere) {
+      const water = Math.random() < 0.5;
+      return { x: Math.random() * w, y: anywhere ? Math.random() * h : h + 6, vy: 8 + Math.random() * 18, sway: Math.random() * 6.28, r: water ? 1 + Math.random() * 2.2 : 0.8 + Math.random() * 1.4, water, tw: Math.random() * 6.28 };
+    }
+    // Two cables: one hanging near the top, one near the bottom.
+    function wire(i, t) {
+      const c = i === 0
+        ? { x0: -30, y0: 8, x2: w + 30, y2: 18, cx: w * 0.55, cy: 58 }
+        : { x0: -30, y0: h - 34, x2: w + 30, y2: h - 52, cx: w * 0.45, cy: h + 6 };
+      const u = 1 - t;
+      return { x: u * u * c.x0 + 2 * u * t * c.cx + t * t * c.x2, y: u * u * c.y0 + 2 * u * t * c.cy + t * t * c.y2 };
+    }
+    function drawWires() {
+      ctx.lineCap = "round";
+      for (let i = 0; i < 2; i++) {
+        ctx.beginPath();
+        for (let k = 0; k <= 40; k++) { const p = wire(i, k / 40); k ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y); }
+        ctx.strokeStyle = "rgba(8,12,18,0.9)"; ctx.lineWidth = 6; ctx.stroke();
+        ctx.strokeStyle = "rgba(120,135,155,0.35)"; ctx.lineWidth = 1.5; ctx.stroke();
+      }
+    }
+    function spark() {
+      const i = Math.random() < 0.55 ? 1 : 0, t = 0.15 + Math.random() * 0.7, p = wire(i, t);
+      flashes.push({ x: p.x, y: p.y, life: 0, max: 0.35 });
+      const n = 24 + Math.floor(Math.random() * 22);
+      for (let k = 0; k < n; k++) {
+        const a = i === 1 ? -Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.3 : Math.PI / 2 + (Math.random() - 0.5) * Math.PI * 1.4;
+        const v = 90 + Math.random() * 260;
+        parts.push({ x: p.x, y: p.y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0, max: 0.4 + Math.random() * 0.7, kind: "spark" });
+      }
+    }
+    // Lightning arc jumping between two points anywhere on the panel.
+    function arc() {
+      const x1 = Math.random() * w, y1 = Math.random() * h * 0.9;
+      const ang = Math.random() * Math.PI * 2, len = 60 + Math.random() * Math.min(w, h) * 0.6;
+      const x2 = Math.max(0, Math.min(w, x1 + Math.cos(ang) * len)), y2 = Math.max(0, Math.min(h, y1 + Math.sin(ang) * len));
+      const pts = [];
+      const steps = 10 + Math.floor(len / 18);
+      for (let k = 0; k <= steps; k++) {
+        const t = k / steps, j = k === 0 || k === steps ? 0 : (Math.random() - 0.5) * 22;
+        pts.push({ x: x1 + (x2 - x1) * t + j * Math.sin(ang), y: y1 + (y2 - y1) * t - j * Math.cos(ang) });
+      }
+      arcs.push({ pts, life: 0, max: 0.32, hue: Math.random() < 0.6 ? "blue" : "gold" });
+    }
+    function addDrop() {
+      drops.push({ x: 10 + Math.random() * (w - 20), y: -12, vy: 40 + Math.random() * 60, r: 2.8 + Math.random() * 2.6 });
+    }
+    function splash(x, y, r) {
+      ripples.push({ x, y, life: 0, max: 0.7, r });
+      for (let k = 0; k < 6; k++) {
+        const a = -Math.PI / 2 + (Math.random() - 0.5) * 2.2, v = 40 + Math.random() * 70;
+        parts.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life: 0, max: 0.45 + Math.random() * 0.3, kind: "water" });
+      }
+    }
+    function frame(now) {
+      const dt = Math.min(0.05, (now - last) / 1000); last = now;
+      ctx.clearRect(0, 0, w, h);
+
+      // motes: tiny bubbles and embers drifting up across the whole background
+      for (const m of motes) {
+        m.y -= m.vy * dt; m.sway += dt * 1.4; m.tw += dt * 3;
+        if (m.y < -8) Object.assign(m, newMote(false));
+        const x = m.x + Math.sin(m.sway) * 6, a = 0.25 + 0.25 * Math.sin(m.tw);
+        if (m.water) {
+          ctx.strokeStyle = `rgba(140,190,255,${a + 0.1})`; ctx.lineWidth = 1;
+          ctx.beginPath(); ctx.arc(x, m.y, m.r, 0, Math.PI * 2); ctx.stroke();
+        } else {
+          ctx.fillStyle = `rgba(255,200,80,${a + 0.15})`;
+          ctx.beginPath(); ctx.arc(x, m.y, m.r, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+
+      drawWires();
+      // current pulses travelling along both cables
+      ctx.save(); ctx.globalCompositeOperation = "lighter";
+      for (let i = 0; i < 2; i++) {
+        pulses[i] += dt * (i ? 0.45 : 0.38); if (pulses[i] > 1.4) pulses[i] = 0;
+        const pt = pulses[i];
+        if (pt > 1) continue;
+        for (let k = 0; k < 10; k++) {
+          const tt = pt - k * 0.012; if (tt < 0) break;
+          const p = wire(i, tt);
+          ctx.fillStyle = `rgba(255,${210 - k * 8},${80 - k * 6},${0.75 - k * 0.07})`;
+          ctx.beginPath(); ctx.arc(p.x, p.y, 3.2 - k * 0.22, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      ctx.restore();
+
+      nextDrop -= dt * 1000; if (nextDrop <= 0) { addDrop(); nextDrop = 220 + Math.random() * 360; }
+      nextSpark -= dt * 1000; if (nextSpark <= 0) { spark(); nextSpark = 800 + Math.random() * 1400; }
+      nextArc -= dt * 1000; if (nextArc <= 0) { arc(); nextArc = 1600 + Math.random() * 2600; }
+
+      // falling drops
+      for (let i = drops.length - 1; i >= 0; i--) {
+        const d = drops[i];
+        d.vy += 520 * dt; d.y += d.vy * dt;
+        const tw = Math.max(0, Math.min(1, (d.x + 30) / (w + 60)));
+        const wy = wire(1, tw).y;
+        if (Math.abs(d.y - wy) < 4 && Math.random() < 0.35) { splash(d.x, wy, d.r); drops.splice(i, 1); continue; }
+        if (d.y >= h - 4) { splash(d.x, h - 4, d.r); drops.splice(i, 1); continue; }
+        ctx.fillStyle = "rgba(90,160,255,0.7)";
+        ctx.beginPath();
+        ctx.moveTo(d.x, d.y - d.r * 3);
+        ctx.quadraticCurveTo(d.x + d.r * 1.4, d.y, d.x, d.y + d.r);
+        ctx.quadraticCurveTo(d.x - d.r * 1.4, d.y, d.x, d.y - d.r * 3);
+        ctx.fill();
+        ctx.fillStyle = "rgba(255,255,255,0.55)";
+        ctx.beginPath(); ctx.arc(d.x - d.r * 0.35, d.y - d.r * 0.2, d.r * 0.3, 0, Math.PI * 2); ctx.fill();
+      }
+      for (let i = ripples.length - 1; i >= 0; i--) {
+        const r = ripples[i]; r.life += dt; const k = r.life / r.max;
+        if (k >= 1) { ripples.splice(i, 1); continue; }
+        ctx.strokeStyle = `rgba(120,180,255,${0.45 * (1 - k)})`; ctx.lineWidth = 1.2;
+        ctx.beginPath(); ctx.ellipse(r.x, r.y, 4 + k * 18 * (r.r / 3), 1.5 + k * 4, 0, 0, Math.PI * 2); ctx.stroke();
+      }
+
+      ctx.save(); ctx.globalCompositeOperation = "lighter";
+      // lightning arcs
+      for (let i = arcs.length - 1; i >= 0; i--) {
+        const A = arcs[i]; A.life += dt; const k = A.life / A.max;
+        if (k >= 1) { arcs.splice(i, 1); continue; }
+        if (Math.random() < 0.3) continue; // flicker
+        const col = A.hue === "blue" ? "150,205,255" : "255,215,120";
+        ctx.lineJoin = "round";
+        [[7, 0.12], [3, 0.35], [1.3, 0.95]].forEach(([lw, al]) => {
+          ctx.strokeStyle = `rgba(${col},${al * (1 - k)})`; ctx.lineWidth = lw;
+          ctx.beginPath(); A.pts.forEach((p, n) => (n ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y))); ctx.stroke();
+        });
+      }
+      for (let i = flashes.length - 1; i >= 0; i--) {
+        const f = flashes[i]; f.life += dt; const k = f.life / f.max;
+        if (k >= 1) { flashes.splice(i, 1); continue; }
+        const g = ctx.createRadialGradient(f.x, f.y, 0, f.x, f.y, 46);
+        g.addColorStop(0, `rgba(255,240,180,${0.8 * (1 - k)})`); g.addColorStop(1, "rgba(255,160,0,0)");
+        ctx.fillStyle = g; ctx.beginPath(); ctx.arc(f.x, f.y, 46, 0, Math.PI * 2); ctx.fill();
+      }
+      for (let i = parts.length - 1; i >= 0; i--) {
+        const q = parts[i]; q.life += dt; const k = q.life / q.max;
+        if (k >= 1) { parts.splice(i, 1); continue; }
+        q.vy += (q.kind === "spark" ? 420 : 380) * dt; q.vx *= 0.99;
+        const px = q.x, py = q.y; q.x += q.vx * dt; q.y += q.vy * dt;
+        if (q.kind === "spark") {
+          ctx.strokeStyle = `rgba(255,${Math.round(230 - 120 * k)},${Math.round(120 - 110 * k)},${1 - k})`;
+          ctx.lineWidth = 1.6; ctx.beginPath(); ctx.moveTo(px, py); ctx.lineTo(q.x, q.y); ctx.stroke();
+        } else {
+          ctx.fillStyle = `rgba(140,190,255,${0.7 * (1 - k)})`;
+          ctx.beginPath(); ctx.arc(q.x, q.y, 1.3, 0, Math.PI * 2); ctx.fill();
+        }
+      }
+      ctx.restore();
+      raf = requestAnimationFrame(frame);
+    }
+    resize();
+    const ro = typeof ResizeObserver !== "undefined" ? new ResizeObserver(resize) : null;
+    ro && ro.observe(canvas);
+    if (reduce) { drawWires(); } else { raf = requestAnimationFrame(frame); }
+    return () => { cancelAnimationFrame(raf); ro && ro.disconnect(); };
+  }, []);
+  return <canvas ref={ref} className="auth-fx" aria-hidden="true" />;
+}
 
 function AuthLayout({ children }) {
   const [i, setI] = useState(0);
@@ -886,10 +1140,12 @@ function AuthLayout({ children }) {
     <div className="auth">
       <aside className="auth-brand">
         <div className="auth-glow" aria-hidden="true" />
+        <AuthFx />
         <div className="auth-brand-top">
           <JobflowLogo size={48} />
           <JobflowWordmark />
           <div className="auth-theme">
+            <InstallButton />
             <ThemeToggle />
           </div>
         </div>
@@ -939,6 +1195,7 @@ function Topbar({ company, onLogout, onEdit, subtitle }) {
           </div>
         </button>
         <div className="topbar-actions">
+          <InstallButton label="Install" />
           <ThemeToggle />
           {company && onEdit && (
               <button className="tb-btn" onClick={onEdit}>
