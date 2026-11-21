@@ -809,30 +809,29 @@ function downloadRetainerPdf(r, company) {
 
 // ---------------- Topbar ----------------
 function Topbar({ company, onLogout, onEdit, subtitle }) {
+  const initial = (company?.name || "T").trim().charAt(0).toUpperCase();
   return (
-    <div className="topbar">
-      <div className="brand">
-        <span className="wordmark">Twofold</span>
-        <span className="tag">quotes &amp; invoices</span>
+    <header className="topbar">
+      <div className="topbar-co">
+        {company?.logo ? <img src={company.logo} alt="" className="topbar-logo" /> : <span className="topbar-mark">{initial}</span>}
+        <div className="topbar-names">
+          <div className="topbar-name">{company ? company.name : "Twofold"}</div>
+          <div className="topbar-sub">{subtitle || (company ? "Quotes, invoices & job cards" : "Quotes & invoices")}</div>
+        </div>
       </div>
       {company && (
-        <div className="company-chip">
-          {company.logo && <img src={company.logo} alt="" />}
-          <span className="cname">
-            {company.name}
-            {subtitle && <span style={{ fontWeight: 400, color: "var(--ink-soft)" }}> — {subtitle}</span>}
-          </span>
+        <div className="topbar-actions">
           {onEdit && (
-            <button className="btn btn-quiet btn-sm" onClick={onEdit}>
-              Edit logo
+            <button className="tb-btn" onClick={onEdit}>
+              Settings
             </button>
           )}
-          <button className="btn btn-quiet btn-sm" onClick={onLogout}>
+          <button className="tb-btn" onClick={onLogout}>
             Sign out
           </button>
         </div>
       )}
-    </div>
+    </header>
   );
 }
 
@@ -2648,26 +2647,68 @@ function RetainerList({ company, retainers, onLogout, onEdit, onSection, onNew, 
   );
 }
 
+function AgreementPreview({ text }) {
+  const blocks = [];
+  (text || "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .forEach((raw, i) => {
+      const line = raw.trimEnd();
+      if (!line.trim()) return;
+      if (/^#{1,3}\s+/.test(line)) {
+        blocks.push(
+          <h4 key={i} className="agr-h">
+            {line.replace(/^#{1,3}\s+/, "")}
+          </h4>
+        );
+        return;
+      }
+      const m = line.match(/^\s*((?:\d+(?:\.\d+)*\.?)|[a-z]\)|\([a-z0-9]+\)|-|•)\s+(.*)$/i);
+      if (m) {
+        blocks.push(
+          <div key={i} className="agr-clause">
+            <span className="agr-num">{m[1] === "-" ? "•" : m[1]}</span>
+            <span>{m[2]}</span>
+          </div>
+        );
+      } else {
+        blocks.push(
+          <p key={i} className="agr-p">
+            {line.trim()}
+          </p>
+        );
+      }
+    });
+  return <div className="agr-body">{blocks}</div>;
+}
+
 function RetainerEditor({ company, initial, aiAuth, onLogout, onEdit, onBack, onSaved, onDeleted, onCreateInvoice }) {
   const [r, setR] = useState(initial);
   const [dirty, setDirty] = useState(!!initial.isNew);
   const [saving, setSaving] = useState(false);
   const [input, setInput] = useState("");
   const [thinking, setThinking] = useState(false);
+  const [writing, setWriting] = useState(false);
   const [aiError, setAiError] = useState("");
+  const [tab, setTab] = useState(initial.agreement_text && !(initial.chat || []).length ? "agreement" : "assistant");
+  const [editingAgreement, setEditingAgreement] = useState(false);
+  const [changeRequest, setChangeRequest] = useState("");
   const chatEndRef = useRef(null);
+  const latest = useRef(r);
+  latest.current = r;
   const chat = r.chat || [];
+  const busy = thinking || writing;
 
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
-  }, [chat.length, thinking]);
+    if (tab === "assistant") chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" });
+  }, [chat.length, busy, tab]);
 
   function update(fields) {
     setR((prev) => ({ ...prev, ...fields }));
     setDirty(true);
   }
 
-  async function save(record = r, quiet = false) {
+  async function save(record = latest.current, quiet = false) {
     setSaving(true);
     const payload = {
       id: record.id,
@@ -2687,11 +2728,7 @@ function RetainerEditor({ company, initial, aiAuth, onLogout, onEdit, onBack, on
     const { data, error } = await supabase.from("retainers").upsert(payload).select().single();
     setSaving(false);
     if (error) {
-      alert(
-        "Couldn't save: " +
-          error.message +
-          (error.message.includes("retainers") ? "\n\nRun the retainers SQL migration in Supabase first." : "")
-      );
+      alert("Couldn't save: " + error.message + (error.message.includes("retainers") ? "\n\nRun the retainers SQL migration in Supabase first." : ""));
       return null;
     }
     setR((prev) => ({ ...prev, ...data, isNew: false }));
@@ -2700,35 +2737,84 @@ function RetainerEditor({ company, initial, aiAuth, onLogout, onEdit, onBack, on
     return data;
   }
 
-  async function send() {
-    const text = input.trim();
-    if (!text || thinking) return;
-    setAiError("");
-    const userMsg = { role: "user", content: text, at: new Date().toISOString() };
-    const nextChat = [...chat, userMsg];
-    const current = { ...r, chat: nextChat };
-    setR(current);
-    setInput("");
-    setThinking(true);
+  async function callAi(payload, timeoutMs) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
       const res = await fetch("/api/retainer-ai", {
         method: "POST",
+        signal: controller.signal,
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           auth: aiAuth,
           company: { name: company.name, address: company.address, email: company.email, phone: company.phone },
-          retainer: current,
-          messages: nextChat.map((m) => ({ role: m.role, content: m.content }))
+          ...payload
         })
       });
       let data = null;
       try {
         data = await res.json();
       } catch (e) {
-        throw new Error(res.status === 404 ? "The AI function isn't deployed yet (api/retainer-ai.js missing on Vercel)." : "Unexpected reply from the server (" + res.status + ").");
+        throw new Error(res.status === 404 ? "The AI function isn't deployed (api/retainer-ai.js missing on Vercel)." : "Unexpected reply from the server (" + res.status + ").");
       }
       if (!res.ok) throw new Error(data?.error || "AI request failed (" + res.status + ")");
+      return data;
+    } catch (err) {
+      if (err.name === "AbortError") throw new Error("The AI took too long to answer. Please try again.");
+      throw err;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
 
+  async function writeAgreement(instructions, base) {
+    const current = base || latest.current;
+    setWriting(true);
+    setAiError("");
+    try {
+      const data = await callAi(
+        {
+          mode: "agreement",
+          instructions,
+          retainer: current,
+          messages: (current.chat || []).map((m) => ({ role: m.role, content: m.content }))
+        },
+        180000
+      );
+      const hadOne = !!current.agreement_text;
+      const note = {
+        role: "assistant",
+        content: hadOne ? "I've updated the agreement." : "Your agreement is ready.",
+        note: "agreement",
+        at: new Date().toISOString()
+      };
+      const updated = { ...latest.current, agreement_text: data.agreement_text, chat: [...(latest.current.chat || []), note] };
+      setR(updated);
+      latest.current = updated;
+      await save(updated, true);
+      return true;
+    } catch (err) {
+      setAiError((err.message || String(err)) + " You can try again with “Write with AI” on the Agreement tab.");
+      return false;
+    } finally {
+      setWriting(false);
+    }
+  }
+
+  async function send() {
+    const text = input.trim();
+    if (!text || busy) return;
+    setAiError("");
+    const userMsg = { role: "user", content: text, at: new Date().toISOString() };
+    const nextChat = [...chat, userMsg];
+    const current = { ...latest.current, chat: nextChat };
+    setR(current);
+    latest.current = current;
+    setInput("");
+    setThinking(true);
+    let follow = null;
+    try {
+      const data = await callAi({ retainer: current, messages: nextChat.map((m) => ({ role: m.role, content: m.content })) }, 120000);
       const changes = {};
       const f = data.fields || {};
       ["title", "client_name", "client_address", "client_email", "start_date"].forEach((k) => {
@@ -2736,27 +2822,32 @@ function RetainerEditor({ company, initial, aiAuth, onLogout, onEdit, onBack, on
       });
       if (typeof f.monthly_fee === "number" && f.monthly_fee >= 0) changes.monthly_fee = f.monthly_fee;
       if (Number.isInteger(f.term_months) && f.term_months > 0) changes.term_months = f.term_months;
-      if (typeof data.agreement_text === "string" && data.agreement_text.trim()) changes.agreement_text = data.agreement_text.trim();
-
-      const notes = [];
-      if (Object.keys(changes).some((k) => k !== "agreement_text")) notes.push("updated the details");
-      if (changes.agreement_text) notes.push(r.agreement_text ? "updated the agreement" : "drafted the agreement");
       const aiMsg = {
         role: "assistant",
         content: data.reply || "(no reply)",
-        note: notes.length ? "✓ " + notes.join(" and ") : "",
+        note: Object.keys(changes).length ? "details" : "",
         at: new Date().toISOString()
       };
-      const updated = { ...current, ...changes, chat: [...nextChat, aiMsg] };
+      const updated = { ...latest.current, ...changes, chat: [...nextChat, aiMsg] };
       setR(updated);
-      // Save straight away so nothing from the conversation is lost.
+      latest.current = updated;
       await save(updated, true);
+      if (data.write_agreement) follow = data.agreement_instructions || text;
     } catch (err) {
       setAiError(err.message || String(err));
       setDirty(true);
     } finally {
       setThinking(false);
     }
+    if (follow) await writeAgreement(follow);
+  }
+
+  async function rewriteWithAi() {
+    const req = changeRequest.trim();
+    const ok = await writeAgreement(
+      req ? `Update the current agreement: ${req}` : "Write the complete agreement based on the details and the conversation."
+    );
+    if (ok) setChangeRequest("");
   }
 
   async function handleDelete() {
@@ -2781,175 +2872,239 @@ function RetainerEditor({ company, initial, aiAuth, onLogout, onEdit, onBack, on
   const starters = [
     "Work out a monthly retainer for a body corporate with 3 blocks",
     "Help me price maintenance for a small business",
-    "Write the agreement using the details below"
+    "Write the agreement using the details I've filled in"
   ];
 
   return (
     <>
       <Topbar company={company} onLogout={onLogout} onEdit={onEdit} />
       <div className="container">
-        <div className="doc-actions">
-          <div className="doc-actions-left">
-            <button className="btn btn-quiet btn-sm" onClick={back}>
-              ← Back
-            </button>
-          </div>
-          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-            <button className="btn btn-sm btn-primary" disabled={saving} onClick={() => save()}>
-              {saving ? "Saving…" : dirty ? "Save" : "Saved"}
-            </button>
-            <button className="btn btn-sm" disabled={!r.agreement_text} onClick={() => downloadRetainerPdf(r, company)}>
-              Download PDF
-            </button>
-            <button
-              className="btn btn-sm"
-              disabled={!r.client_name || !Number(r.monthly_fee)}
-              onClick={() => onCreateInvoice(r)}
-            >
-              Create monthly invoice
-            </button>
-            <button className="btn btn-sm btn-danger" onClick={handleDelete}>
-              Delete
-            </button>
-          </div>
-        </div>
-
-        {/* AI assistant */}
-        <div className="form-section">
-          <h3>AI assistant</h3>
-          <p className="hint" style={{ marginTop: 0 }}>
-            Tell it about the client and the work. It will ask what it needs, work out the monthly fee, and write the agreement for you.
-          </p>
-          <div
-            style={{
-              maxHeight: "55vh",
-              overflowY: "auto",
-              display: "flex",
-              flexDirection: "column",
-              gap: 10,
-              padding: chat.length ? "4px 0 10px" : 0
-            }}
-          >
-            {chat.map((m, i) => (
-              <div
-                key={i}
-                style={{
-                  alignSelf: m.role === "user" ? "flex-end" : "flex-start",
-                  maxWidth: "88%",
-                  background: m.role === "user" ? "var(--accent, #1e3a5f)" : "var(--paper-alt, #e4e7e1)",
-                  color: m.role === "user" ? "#fff" : "var(--ink, #141a24)",
-                  borderRadius: 12,
-                  padding: "9px 12px",
-                  fontSize: 14,
-                  lineHeight: 1.45,
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word"
-                }}
-              >
-                {m.content}
-                {m.note && <div style={{ marginTop: 6, fontSize: 12, fontWeight: 600, opacity: 0.75 }}>{m.note}</div>}
-              </div>
-            ))}
-            {thinking && <div className="hint" style={{ margin: 0 }}>Thinking… (drafting a full agreement can take up to a minute)</div>}
-            <div ref={chatEndRef} />
-          </div>
-          {chat.length === 0 && (
-            <div style={{ display: "flex", flexWrap: "wrap", gap: 8, marginBottom: 10 }}>
-              {starters.map((s) => (
-                <button key={s} className="chip" onClick={() => setInput(s)}>
-                  {s}
-                </button>
-              ))}
-            </div>
-          )}
-          {aiError && <div className="error-msg" style={{ marginBottom: 10 }}>{aiError}</div>}
-          <div className="field" style={{ marginBottom: 8 }}>
-            <textarea
-              rows={3}
-              value={input}
-              placeholder="e.g. Body corporate in Midrand, 40 units, wants 1 maintenance visit a month and up to 2 emergency call-outs…"
-              onChange={(e) => setInput(e.target.value)}
-            />
-          </div>
-          <button className="btn btn-primary" disabled={thinking || !input.trim()} onClick={send}>
-            {thinking ? "Thinking…" : "Send"}
+        <div className="editor-head">
+          <button className="btn btn-quiet btn-sm" onClick={back}>
+            ← Retainers
+          </button>
+          <button className="btn btn-sm btn-primary" disabled={saving || !dirty} onClick={() => save()}>
+            {saving ? "Saving…" : dirty ? "Save" : "Saved"}
           </button>
         </div>
+        <div className="editor-title">
+          <h2>{r.client_name || "New retainer"}</h2>
+          <div className="editor-sub">
+            <span className={`status-pill ${RETAINER_PILL[r.status] || "status-draft"}`}>{RETAINER_STATUS[r.status] || r.status}</span>
+            {Number(r.monthly_fee) > 0 && <span className="editor-fee">R{money(Number(r.monthly_fee))} per month</span>}
+          </div>
+        </div>
 
-        {/* Details */}
-        <div className="form-section">
-          <h3>Details</h3>
-          <div className="field">
-            <label>Title</label>
-            <input value={r.title || ""} onChange={(e) => update({ title: e.target.value })} placeholder="e.g. Monthly electrical maintenance" />
-          </div>
-          <div className="field">
-            <label>Client name</label>
-            <input value={r.client_name || ""} onChange={(e) => update({ client_name: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>Client address</label>
-            <textarea rows={2} value={r.client_address || ""} onChange={(e) => update({ client_address: e.target.value })} />
-          </div>
-          <div className="field">
-            <label>Client email</label>
-            <input type="email" value={r.client_email || ""} onChange={(e) => update({ client_email: e.target.value })} />
-          </div>
-          <div className="field-row">
-            <div className="field">
-              <label>Monthly fee (R)</label>
-              <input
-                type="number"
-                min="0"
-                step="0.01"
-                value={r.monthly_fee ?? ""}
-                onChange={(e) => update({ monthly_fee: e.target.value === "" ? "" : Number(e.target.value) })}
-              />
+        <div className="seg" role="tablist">
+          {[
+            ["assistant", "Assistant"],
+            ["agreement", r.agreement_text ? "Agreement ✓" : "Agreement"],
+            ["details", "Details"]
+          ].map(([k, label]) => (
+            <button key={k} role="tab" className={tab === k ? "active" : ""} onClick={() => setTab(k)}>
+              {label}
+            </button>
+          ))}
+        </div>
+
+        {aiError && <div className="banner banner-warn">{aiError}</div>}
+        {writing && <div className="banner">Writing the agreement… this can take up to a minute.</div>}
+
+        {tab === "assistant" && (
+          <div className="form-section">
+            <p className="hint" style={{ marginTop: 0 }}>
+              Tell the assistant about the client and the work. It asks what it needs, works out the monthly fee, and writes the agreement.
+            </p>
+            <div className="chat">
+              {chat.map((m, i) => (
+                <div key={i} className={`bubble ${m.role === "user" ? "bubble-me" : "bubble-ai"}`}>
+                  {m.content}
+                  {m.note === "details" && <div className="bubble-note">Details updated</div>}
+                  {m.note === "agreement" && (
+                    <button className="btn btn-sm btn-primary bubble-btn" onClick={() => setTab("agreement")}>
+                      View agreement
+                    </button>
+                  )}
+                  {m.note && m.note.startsWith("✓") && <div className="bubble-note">{m.note.replace("✓ ", "")}</div>}
+                </div>
+              ))}
+              {thinking && <div className="bubble bubble-ai bubble-wait">Thinking…</div>}
+              <div ref={chatEndRef} />
             </div>
-            <div className="field">
-              <label>Term (months)</label>
-              <input
-                type="number"
-                min="1"
-                value={r.term_months ?? ""}
-                onChange={(e) => update({ term_months: e.target.value === "" ? "" : parseInt(e.target.value, 10) })}
-              />
-            </div>
-          </div>
-          <div className="field-row">
-            <div className="field">
-              <label>Start date</label>
-              <input type="date" value={r.start_date || ""} onChange={(e) => update({ start_date: e.target.value })} />
-            </div>
-            <div className="field">
-              <label>Status</label>
-              <select value={r.status || "draft"} onChange={(e) => update({ status: e.target.value })}>
-                {Object.entries(RETAINER_STATUS).map(([k, label]) => (
-                  <option key={k} value={k}>
-                    {label}
-                  </option>
+            {chat.length === 0 && (
+              <div className="starter-row">
+                {starters.map((s) => (
+                  <button key={s} className="chip" onClick={() => setInput(s)}>
+                    {s}
+                  </button>
                 ))}
-              </select>
+              </div>
+            )}
+            <div className="composer">
+              <textarea
+                rows={3}
+                value={input}
+                placeholder="e.g. Body corporate in Midrand, 40 units, 1 maintenance visit a month and up to 2 emergency call-outs"
+                onChange={(e) => setInput(e.target.value)}
+              />
+              <button className="btn btn-primary" disabled={busy || !input.trim()} onClick={send}>
+                {thinking ? "Thinking…" : "Send"}
+              </button>
             </div>
           </div>
-        </div>
+        )}
 
-        {/* Agreement */}
-        <div className="form-section">
-          <h3>Agreement</h3>
-          <p className="hint" style={{ marginTop: 0 }}>
-            The AI fills this in. You can also edit it yourself. Headings start with “## ”. Have your main template checked by a lawyer once before using it with clients.
-          </p>
-          <div className="field" style={{ marginBottom: 0 }}>
-            <textarea
-              rows={18}
-              value={r.agreement_text || ""}
-              onChange={(e) => update({ agreement_text: e.target.value })}
-              style={{ fontSize: 13, lineHeight: 1.5 }}
-              placeholder="Ask the AI assistant to draft the agreement, or type it here."
-            />
-          </div>
-        </div>
+        {tab === "agreement" && (
+          <>
+            {!r.agreement_text && !editingAgreement ? (
+              <div className="empty-state">
+                <div className="big">No agreement yet</div>
+                <div style={{ marginBottom: 18 }}>Let the assistant write it from the details and your conversation, or type your own.</div>
+                <div style={{ display: "flex", gap: 8, justifyContent: "center", flexWrap: "wrap" }}>
+                  <button className="btn btn-primary" disabled={busy} onClick={rewriteWithAi}>
+                    {writing ? "Writing…" : "Write with AI"}
+                  </button>
+                  <button className="btn" onClick={() => setEditingAgreement(true)}>
+                    Type it myself
+                  </button>
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="agr-toolbar">
+                  <button className="btn btn-sm" onClick={() => setEditingAgreement((v) => !v)}>
+                    {editingAgreement ? "Done editing" : "Edit"}
+                  </button>
+                  <button className="btn btn-sm" disabled={!r.agreement_text} onClick={() => downloadRetainerPdf(r, company)}>
+                    Download PDF
+                  </button>
+                  <button className="btn btn-sm btn-primary" disabled={saving || !dirty} onClick={() => save()}>
+                    {saving ? "Saving…" : dirty ? "Save" : "Saved"}
+                  </button>
+                </div>
+                {editingAgreement ? (
+                  <div className="form-section">
+                    <p className="hint" style={{ marginTop: 0 }}>
+                      Headings start with “## ”. Clauses like “3.1”. Tap Done editing to see how it looks.
+                    </p>
+                    <div className="field" style={{ marginBottom: 0 }}>
+                      <textarea
+                        className="agr-edit"
+                        rows={22}
+                        value={r.agreement_text || ""}
+                        onChange={(e) => update({ agreement_text: e.target.value })}
+                      />
+                    </div>
+                  </div>
+                ) : (
+                  <div className="sheet agr-sheet">
+                    <div className="agr-top">
+                      <div>
+                        <div className="sheet-co-name">{company.name}</div>
+                        <div className="sheet-co-addr">{[company.address, company.email, company.phone].filter(Boolean).join("\n")}</div>
+                      </div>
+                      <div className="sheet-doc-title">Retainer Agreement</div>
+                    </div>
+                    <div className="sheet-billto">
+                      <div className="label">Client</div>
+                      <div className="name">{r.client_name || "—"}</div>
+                      <div className="addr">{r.client_address}</div>
+                      <div className="agr-terms">
+                        <span>Monthly fee: <b>{Number(r.monthly_fee) ? `R${money(Number(r.monthly_fee))}` : "—"}</b></span>
+                        <span>Start: <b>{r.start_date ? fmtDate(r.start_date) : "—"}</b></span>
+                        <span>Term: <b>{r.term_months ? `${r.term_months} months` : "—"}</b></span>
+                      </div>
+                    </div>
+                    <AgreementPreview text={r.agreement_text} />
+                  </div>
+                )}
+                <div className="form-section" style={{ marginTop: 18 }}>
+                  <h3>Change it with AI</h3>
+                  <div className="composer">
+                    <textarea
+                      rows={2}
+                      value={changeRequest}
+                      placeholder="e.g. Add a clause that call-outs after 6pm are charged at R850"
+                      onChange={(e) => setChangeRequest(e.target.value)}
+                    />
+                    <button className="btn btn-primary" disabled={busy || !changeRequest.trim()} onClick={rewriteWithAi}>
+                      {writing ? "Updating…" : "Update"}
+                    </button>
+                  </div>
+                  <p className="hint">Have your main template checked by a lawyer once before using it with clients.</p>
+                </div>
+              </>
+            )}
+          </>
+        )}
+
+        {tab === "details" && (
+          <>
+            <div className="form-section">
+              <div className="field">
+                <label>Title</label>
+                <input value={r.title || ""} onChange={(e) => update({ title: e.target.value })} placeholder="e.g. Monthly electrical maintenance" />
+              </div>
+              <div className="field">
+                <label>Client name</label>
+                <input value={r.client_name || ""} onChange={(e) => update({ client_name: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Client address</label>
+                <textarea rows={2} value={r.client_address || ""} onChange={(e) => update({ client_address: e.target.value })} />
+              </div>
+              <div className="field">
+                <label>Client email</label>
+                <input type="email" value={r.client_email || ""} onChange={(e) => update({ client_email: e.target.value })} />
+              </div>
+              <div className="field-row">
+                <div className="field">
+                  <label>Monthly fee (R)</label>
+                  <input
+                    type="number"
+                    min="0"
+                    step="0.01"
+                    value={r.monthly_fee ?? ""}
+                    onChange={(e) => update({ monthly_fee: e.target.value === "" ? "" : Number(e.target.value) })}
+                  />
+                </div>
+                <div className="field">
+                  <label>Term (months)</label>
+                  <input
+                    type="number"
+                    min="1"
+                    value={r.term_months ?? ""}
+                    onChange={(e) => update({ term_months: e.target.value === "" ? "" : parseInt(e.target.value, 10) })}
+                  />
+                </div>
+              </div>
+              <div className="field-row">
+                <div className="field">
+                  <label>Start date</label>
+                  <input type="date" value={r.start_date || ""} onChange={(e) => update({ start_date: e.target.value })} />
+                </div>
+                <div className="field">
+                  <label>Status</label>
+                  <select value={r.status || "draft"} onChange={(e) => update({ status: e.target.value })}>
+                    {Object.entries(RETAINER_STATUS).map(([k, label]) => (
+                      <option key={k} value={k}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+            </div>
+            <div className="danger-row">
+              <button className="btn" disabled={!r.client_name || !Number(r.monthly_fee)} onClick={() => onCreateInvoice(r)}>
+                Create this month's invoice
+              </button>
+              <button className="btn btn-danger" onClick={handleDelete}>
+                Delete retainer
+              </button>
+            </div>
+          </>
+        )}
       </div>
     </>
   );
