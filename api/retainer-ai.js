@@ -183,19 +183,42 @@ const GEMINI_SCHEMA = {
 
 async function callGemini(system, convo) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
-  const aiRes = await fetch(url, {
-    method: "POST",
-    headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
-    body: JSON.stringify({
-      systemInstruction: { parts: [{ text: system }] },
-      contents: convo.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
-      generationConfig: {
-        responseMimeType: "application/json",
-        responseSchema: GEMINI_SCHEMA,
-        maxOutputTokens: 32768
-      }
-    })
-  });
+  const baseBody = {
+    systemInstruction: { parts: [{ text: system }] },
+    contents: convo.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
+    generationConfig: {
+      responseMimeType: "application/json",
+      responseSchema: GEMINI_SCHEMA,
+      maxOutputTokens: 16384
+    }
+  };
+  async function post(body) {
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 110000);
+    try {
+      return await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "x-goog-api-key": process.env.GEMINI_API_KEY },
+        body: JSON.stringify(body),
+        signal: controller.signal
+      });
+    } catch (e) {
+      if (e.name === "AbortError") return null;
+      throw e;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  // Ask for quick (low) thinking so replies come back faster; older models
+  // don't support this setting, so retry without it if Google rejects it.
+  let aiRes = await post({ ...baseBody, generationConfig: { ...baseBody.generationConfig, thinkingConfig: { thinkingLevel: "low" } } });
+  if (aiRes && aiRes.status === 400) {
+    const errText = await aiRes.clone().text().catch(() => "");
+    if (/thinking/i.test(errText)) aiRes = await post(baseBody);
+  }
+  if (!aiRes) {
+    return { status: 504, error: "Google's AI took too long to answer. Try again, or ask for one thing at a time (e.g. just the price first)." };
+  }
   const data = await aiRes.json().catch(() => ({}));
   if (!aiRes.ok) {
     if (aiRes.status === 429) {
@@ -223,11 +246,21 @@ async function callGemini(system, convo) {
 }
 
 export default async function handler(req, res) {
+  const provider = pickProvider();
+  if (req.method === "GET") {
+    // Health check: open /api/retainer-ai in a browser to see if the AI is set up.
+    res.status(200).json({
+      ok: true,
+      provider: provider || "none — add GEMINI_API_KEY in Vercel and redeploy",
+      model: provider === "gemini" ? GEMINI_MODEL : provider === "anthropic" ? CLAUDE_MODEL : null,
+      supabase: !!(process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL)
+    });
+    return;
+  }
   if (req.method !== "POST") {
     res.status(405).json({ error: "Use POST." });
     return;
   }
-  const provider = pickProvider();
   if (!provider) {
     res.status(500).json({
       error: "The AI isn't set up yet: add GEMINI_API_KEY (free, from aistudio.google.com) in Vercel → Settings → Environment Variables, then redeploy."
@@ -282,4 +315,4 @@ export default async function handler(req, res) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong: " + (err?.message || String(err)) });
   }
-}
+      }
