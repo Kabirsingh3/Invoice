@@ -809,33 +809,24 @@ function downloadRetainerPdf(r, company) {
 
 // ---------------- Topbar ----------------
 // ---------------- Jobflow brand ----------------
-// Animated logo: a colour wheel slowly turning behind a white "J" path, with a
-// small dot (a job) travelling along it. Motion stops if the phone asks for
+// Logo: a spark (electrical) and a water drop (plumbing). The spark flickers
+// now and then and the drop gently bobs. Motion stops if the phone asks for
 // reduced motion.
 function JobflowLogo({ size = 40 }) {
-  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
-  const g = `jfg${uid}`;
-  const c = `jfc${uid}`;
   return (
     <svg className="jf-logo" viewBox="0 0 64 64" width={size} height={size} role="img" aria-label="Jobflow">
-      <defs>
-        <linearGradient id={g} x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#FF3D7F" />
-          <stop offset="0.2" stopColor="#FF8A00" />
-          <stop offset="0.4" stopColor="#FFD60A" />
-          <stop offset="0.6" stopColor="#2EC4B6" />
-          <stop offset="0.8" stopColor="#3A86FF" />
-          <stop offset="1" stopColor="#8338EC" />
-        </linearGradient>
-        <clipPath id={c}>
-          <rect width="64" height="64" rx="16" />
-        </clipPath>
-      </defs>
-      <g clipPath={`url(#${c})`}>
-        <rect className="jf-spin" x="-32" y="-32" width="128" height="128" fill={`url(#${g})`} />
+      <path
+        className="jf-bolt"
+        d="M22 6 L10 34 H22 L16 58 L38 26 H26 L32 6 Z"
+        fill="#FFC300"
+        stroke="#FF8A00"
+        strokeWidth="2"
+        strokeLinejoin="round"
+      />
+      <g className="jf-drop">
+        <path d="M46 22 C46 22 56 34 56 42 a10 10 0 0 1 -20 0 C36 34 46 22 46 22 Z" fill="#3A86FF" />
+        <circle cx="42" cy="42" r="2.5" fill="#fff" />
       </g>
-      <path d="M41 14 V36 a11 11 0 0 1 -22 0" fill="none" stroke="#fff" strokeWidth="7.5" strokeLinecap="round" />
-      <circle cx="41" cy="14" r="2.4" fill="#1B2430" className="jf-dot" />
     </svg>
   );
 }

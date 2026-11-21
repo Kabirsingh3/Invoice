@@ -37,16 +37,16 @@ button{font-family:inherit;cursor:pointer;}
 input,select,textarea{font-family:inherit;font-size:15px;}
 ::selection{background:var(--accent-soft);color:var(--accent-dark);}
 :focus-visible{outline:2px solid var(--signal);outline-offset:2px;}
-@media (prefers-reduced-motion: reduce){*{transition:none !important;animation:none !important;}.jf-dot{opacity:0;}}
+@media (prefers-reduced-motion: reduce){*{transition:none !important;animation:none !important;}}
 
 /* ---------- Jobflow brand ---------- */
-.jf-logo{display:block;flex-shrink:0;border-radius:16px;}
-.jf-spin{transform-box:view-box;transform-origin:32px 32px;animation:jf-spin 9s linear infinite;}
-.jf-dot{offset-path:path("M41 14 V36 a11 11 0 0 1 -22 0");offset-rotate:0deg;animation:jf-travel 3.2s cubic-bezier(.55,.1,.45,.9) infinite;}
-@keyframes jf-spin{to{transform:rotate(360deg);}}
-@keyframes jf-travel{0%{offset-distance:0%;opacity:0;}8%{opacity:1;}70%{offset-distance:100%;opacity:1;}82%,100%{offset-distance:100%;opacity:0;}}
+.jf-logo{display:block;flex-shrink:0;overflow:visible;}
+.jf-bolt{animation:jf-flick 3.2s infinite;}
+.jf-drop{animation:jf-bob 2.6s ease-in-out infinite;}
+@keyframes jf-flick{0%,44%,56%,100%{opacity:1;}48%{opacity:.3;}52%{opacity:.8;}}
+@keyframes jf-bob{0%,100%{transform:translateY(0);}50%{transform:translateY(-3px);}}
 .jf-word{font-family:var(--head);font-weight:700;font-size:22px;line-height:1;letter-spacing:0.3px;
-  background:linear-gradient(90deg,#FF3D7F,#FF8A00,#FFD60A,#2EC4B6,#3A86FF,#8338EC,#FF3D7F);background-size:300% 100%;
+  background:linear-gradient(90deg,#FFC300,#FF8A00,#3A86FF,#2EC4B6,#FFC300);background-size:300% 100%;
   -webkit-background-clip:text;background-clip:text;color:transparent;animation:jf-shift 10s linear infinite;}
 .jf-word-big{font-size:46px;}
 @keyframes jf-shift{to{background-position:300% 0;}}
@@ -56,7 +56,7 @@ input,select,textarea{font-family:inherit;font-size:15px;}
 .panel-brand{display:flex;align-items:center;gap:10px;margin-bottom:18px;}
 
 /* ---------- Top bar ---------- */
-.topbar{background:var(--ink);color:#fff;border-bottom:3px solid transparent;border-image:linear-gradient(90deg,#FF3D7F,#FF8A00,#FFD60A,#2EC4B6,#3A86FF,#8338EC) 1;position:sticky;top:0;z-index:20;}
+.topbar{background:var(--ink);color:#fff;border-bottom:3px solid transparent;border-image:linear-gradient(90deg,#FFC300,#FF8A00,#3A86FF,#2EC4B6) 1;position:sticky;top:0;z-index:20;}
 .topbar-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;}
 .topbar-co{display:flex;align-items:center;gap:12px;min-width:0;background:none;border:none;color:inherit;padding:0;text-align:left;}
 .topbar-names{min-width:0;display:flex;flex-direction:column;gap:3px;}
