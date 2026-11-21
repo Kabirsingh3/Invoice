@@ -37,19 +37,40 @@ button{font-family:inherit;cursor:pointer;}
 input,select,textarea{font-family:inherit;font-size:15px;}
 ::selection{background:var(--accent-soft);color:var(--accent-dark);}
 :focus-visible{outline:2px solid var(--signal);outline-offset:2px;}
-@media (prefers-reduced-motion: reduce){*{transition:none !important;animation:none !important;}}
+@media (prefers-reduced-motion: reduce){*{transition:none !important;animation:none !important;}.jf-dot{opacity:0;}}
+
+/* ---------- Jobflow brand ---------- */
+.jf-logo{display:block;flex-shrink:0;border-radius:16px;}
+.jf-spin{transform-box:view-box;transform-origin:32px 32px;animation:jf-spin 9s linear infinite;}
+.jf-dot{offset-path:path("M41 14 V36 a11 11 0 0 1 -22 0");offset-rotate:0deg;animation:jf-travel 3.2s cubic-bezier(.55,.1,.45,.9) infinite;}
+@keyframes jf-spin{to{transform:rotate(360deg);}}
+@keyframes jf-travel{0%{offset-distance:0%;opacity:0;}8%{opacity:1;}70%{offset-distance:100%;opacity:1;}82%,100%{offset-distance:100%;opacity:0;}}
+.jf-word{font-family:var(--head);font-weight:700;font-size:22px;line-height:1;letter-spacing:0.3px;
+  background:linear-gradient(90deg,#FF3D7F,#FF8A00,#FFD60A,#2EC4B6,#3A86FF,#8338EC,#FF3D7F);background-size:300% 100%;
+  -webkit-background-clip:text;background-clip:text;color:transparent;animation:jf-shift 10s linear infinite;}
+.jf-word-big{font-size:46px;}
+@keyframes jf-shift{to{background-position:300% 0;}}
+.brand-hero{display:flex;flex-direction:column;align-items:center;gap:12px;margin-bottom:22px;}
+.brand-hero .jf-word-big{filter:saturate(1.1);}
+.pick-title{font-family:var(--head);font-weight:600;font-size:22px;margin:0 0 22px;color:var(--ink);}
+.panel-brand{display:flex;align-items:center;gap:10px;margin-bottom:18px;}
 
 /* ---------- Top bar ---------- */
-.topbar{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 20px;background:var(--ink);color:#fff;border-bottom:3px solid var(--signal);position:sticky;top:0;z-index:20;}
-.topbar-co{display:flex;align-items:center;gap:12px;min-width:0;}
-.topbar-logo{width:40px;height:40px;object-fit:contain;border-radius:8px;background:#fff;padding:3px;flex-shrink:0;}
-.topbar-mark{width:40px;height:40px;border-radius:8px;background:var(--signal);color:var(--ink);display:flex;align-items:center;justify-content:center;font-family:var(--head);font-weight:700;font-size:22px;flex-shrink:0;}
-.topbar-names{min-width:0;}
-.topbar-name{font-family:var(--head);font-weight:600;font-size:20px;line-height:1.1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;letter-spacing:0.2px;}
-.topbar-sub{font-size:12.5px;color:#AEB8C4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.topbar{background:var(--ink);color:#fff;border-bottom:3px solid transparent;border-image:linear-gradient(90deg,#FF3D7F,#FF8A00,#FFD60A,#2EC4B6,#3A86FF,#8338EC) 1;position:sticky;top:0;z-index:20;}
+.topbar-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 20px;}
+.topbar-co{display:flex;align-items:center;gap:12px;min-width:0;background:none;border:none;color:inherit;padding:0;text-align:left;}
+.topbar-names{min-width:0;display:flex;flex-direction:column;gap:3px;}
+.topbar-sub{font-size:12.5px;color:#C3CCD6;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
 .topbar-actions{display:flex;gap:6px;flex-shrink:0;}
 .tb-btn{background:transparent;border:1px solid rgba(255,255,255,0.22);color:#E8EDF2;border-radius:8px;padding:8px 12px;font-size:13px;font-weight:500;min-height:38px;}
 .tb-btn:hover{background:rgba(255,255,255,0.08);border-color:rgba(255,255,255,0.4);}
+.topbar-nav{display:flex;gap:8px;padding:0 20px 10px;}
+.nav-btn{display:inline-flex;align-items:center;gap:6px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.16);color:#fff;border-radius:999px;padding:6px 14px;font-size:13.5px;font-weight:500;min-height:36px;}
+.nav-btn:hover{background:rgba(255,255,255,0.16);}
+.nav-btn span{font-size:15px;line-height:1;}
+.topbar-logo{width:40px;height:40px;object-fit:contain;border-radius:8px;background:#fff;padding:3px;}
+.topbar-mark{display:none;}
+.topbar-name{font-family:var(--head);font-weight:600;font-size:20px;}
 
 /* legacy brand classes (unused by the new top bar, kept harmless) */
 .brand{display:flex;align-items:baseline;gap:8px;}
@@ -76,7 +97,7 @@ input,select,textarea{font-family:inherit;font-size:15px;}
 /* ---------- Layout ---------- */
 .container{padding:24px 20px;}
 .center-screen{min-height:calc(100vh - 80px);display:flex;align-items:center;justify-content:center;padding:32px 18px;}
-.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-lg);padding:34px 30px;width:100%;max-width:400px;border-top:4px solid var(--signal);}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:14px;box-shadow:var(--shadow-lg);padding:30px 28px;width:100%;max-width:400px;}
 .panel h1{font-family:var(--head);font-size:30px;margin:0 0 4px;font-weight:600;letter-spacing:0.2px;}
 .panel p.sub{color:var(--ink-soft);font-size:14px;margin:0 0 24px;}
 
@@ -223,10 +244,10 @@ table.sheet-items td.num{text-align:right;font-variant-numeric:tabular-nums;}
 
 @media(max-width:640px){
   body{font-size:15px;}
-  .topbar{padding:12px 14px;}
-  .topbar-name{font-size:17px;white-space:normal;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;}
-  .topbar-sub{display:none;}
-  .topbar-logo,.topbar-mark{width:36px;height:36px;}
+  .topbar-row{padding:10px 14px;}
+  .topbar-nav{padding:0 14px 10px;}
+  .jf-word{font-size:20px;}
+  .jf-word-big{font-size:40px;}
   .tb-btn{padding:7px 10px;font-size:12.5px;}
   .container{padding:18px 14px;}
   .tabs{margin:0 -14px 18px;padding:0 14px 2px;}
@@ -254,3 +275,12 @@ table.sheet-items td.num{text-align:right;font-variant-numeric:tabular-nums;}
   table.doclist td.amt-cell{margin-left:auto;font-size:15px;}
   table.doclist td:not(:first-child):not(.amt-cell){color:var(--ink-soft);font-size:13px;}
 }
+
+/* Each section gets its own colour when selected */
+.tab-documents.active{background:#3A86FF;border-color:#3A86FF;}
+.tab-jobcards.active{background:#FF8A00;border-color:#FF8A00;}
+.tab-retainers.active{background:#8338EC;border-color:#8338EC;}
+.tab-technicians.active{background:#2EC4B6;border-color:#2EC4B6;color:#0E2A27;}
+.company-tile .logo-fallback{color:#fff;background:linear-gradient(135deg,#3A86FF,#8338EC);}
+.company-tile:nth-child(2) .logo-fallback{background:linear-gradient(135deg,#FF3D7F,#FF8A00);}
+.company-tile:nth-child(3) .logo-fallback{background:linear-gradient(135deg,#2EC4B6,#3A86FF);}

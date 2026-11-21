@@ -1,4 +1,4 @@
-# Twofold — Quotes & Invoices
+# Jobflow — Quotes, Job Cards & Invoices
 
 A small app for two companies to each log in, create quotes/invoices, and download them as PDFs. Data is stored in Supabase (Postgres); the site is deployed on Vercel.
 

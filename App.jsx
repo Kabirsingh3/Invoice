@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useId } from "react";
 import { supabase } from "./supabaseClient";
 import { jsPDF } from "jspdf";
 import "jspdf-autotable";
@@ -808,28 +808,85 @@ function downloadRetainerPdf(r, company) {
 }
 
 // ---------------- Topbar ----------------
+// ---------------- Jobflow brand ----------------
+// Animated logo: a colour wheel slowly turning behind a white "J" path, with a
+// small dot (a job) travelling along it. Motion stops if the phone asks for
+// reduced motion.
+function JobflowLogo({ size = 40 }) {
+  const uid = useId().replace(/[^a-zA-Z0-9]/g, "");
+  const g = `jfg${uid}`;
+  const c = `jfc${uid}`;
+  return (
+    <svg className="jf-logo" viewBox="0 0 64 64" width={size} height={size} role="img" aria-label="Jobflow">
+      <defs>
+        <linearGradient id={g} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#FF3D7F" />
+          <stop offset="0.2" stopColor="#FF8A00" />
+          <stop offset="0.4" stopColor="#FFD60A" />
+          <stop offset="0.6" stopColor="#2EC4B6" />
+          <stop offset="0.8" stopColor="#3A86FF" />
+          <stop offset="1" stopColor="#8338EC" />
+        </linearGradient>
+        <clipPath id={c}>
+          <rect width="64" height="64" rx="16" />
+        </clipPath>
+      </defs>
+      <g clipPath={`url(#${c})`}>
+        <rect className="jf-spin" x="-32" y="-32" width="128" height="128" fill={`url(#${g})`} />
+      </g>
+      <path d="M41 14 V36 a11 11 0 0 1 -22 0" fill="none" stroke="#fff" strokeWidth="7.5" strokeLinecap="round" />
+      <circle cx="41" cy="14" r="2.4" fill="#1B2430" className="jf-dot" />
+    </svg>
+  );
+}
+
+function JobflowWordmark({ big = false }) {
+  return <span className={`jf-word${big ? " jf-word-big" : ""}`}>Jobflow</span>;
+}
+
+// Navigation set by <App> on every render (Back / Home buttons in the top bar).
+let appNav = { onBack: null, onHome: null, atHome: true };
+
 function Topbar({ company, onLogout, onEdit, subtitle }) {
-  const initial = (company?.name || "T").trim().charAt(0).toUpperCase();
+  const nav = appNav;
+  const showNav = !!company && !nav.atHome;
   return (
     <header className="topbar">
-      <div className="topbar-co">
-        {company?.logo ? <img src={company.logo} alt="" className="topbar-logo" /> : <span className="topbar-mark">{initial}</span>}
-        <div className="topbar-names">
-          <div className="topbar-name">{company ? company.name : "Twofold"}</div>
-          <div className="topbar-sub">{subtitle || (company ? "Quotes, invoices & job cards" : "Quotes & invoices")}</div>
-        </div>
-      </div>
-      {company && (
-        <div className="topbar-actions">
-          {onEdit && (
-            <button className="tb-btn" onClick={onEdit}>
-              Settings
+      <div className="topbar-row">
+        <button
+          className="topbar-co"
+          onClick={() => company && nav.onHome && nav.onHome()}
+          aria-label="Jobflow home"
+          title={company ? "Home" : undefined}
+        >
+          <JobflowLogo size={40} />
+          <div className="topbar-names">
+            <JobflowWordmark />
+            <div className="topbar-sub">{company ? company.name + (subtitle ? ` · ${subtitle}` : "") : "Quotes, job cards & invoices"}</div>
+          </div>
+        </button>
+        {company && (
+          <div className="topbar-actions">
+            {onEdit && (
+              <button className="tb-btn" onClick={onEdit}>
+                Settings
+              </button>
+            )}
+            <button className="tb-btn" onClick={onLogout}>
+              Sign out
             </button>
-          )}
-          <button className="tb-btn" onClick={onLogout}>
-            Sign out
+          </div>
+        )}
+      </div>
+      {showNav && (
+        <nav className="topbar-nav">
+          <button className="nav-btn" onClick={() => nav.onBack && nav.onBack()}>
+            <span aria-hidden="true">←</span> Back
           </button>
-        </div>
+          <button className="nav-btn" onClick={() => nav.onHome && nav.onHome()}>
+            <span aria-hidden="true">⌂</span> Home
+          </button>
+        </nav>
       )}
     </header>
   );
@@ -984,9 +1041,11 @@ function Login({ companies, technicians, onLoggedIn }) {
         <Topbar company={null} />
         <div className="center-screen">
           <div style={{ textAlign: "center", width: "100%" }}>
-            <h1 className="serif" style={{ fontSize: 22, margin: "0 0 26px" }}>
-              Choose a company to sign in
-            </h1>
+            <div className="brand-hero">
+              <JobflowLogo size={72} />
+              <JobflowWordmark big />
+            </div>
+            <h1 className="pick-title">Choose a company to sign in</h1>
             <div className="company-tiles">
               {companies.map((c) => (
                 <button key={c.id} className="company-tile" style={{ cursor: "pointer" }} onClick={() => setPicked(c)}>
@@ -1031,6 +1090,10 @@ function Login({ companies, technicians, onLoggedIn }) {
       <Topbar company={null} />
       <div className="center-screen">
         <div className="panel">
+          <div className="panel-brand">
+            <JobflowLogo size={44} />
+            <JobflowWordmark />
+          </div>
           <h1>{picked.name}</h1>
           <p className="sub">Choose how you're signing in.</p>
           <div className="field">
@@ -1209,7 +1272,7 @@ function AdminTabs({ active, onChange }) {
   return (
     <div className="tabs">
       {tabs.map(([key, label]) => (
-        <button key={key} className={`tab ${active === key ? "active" : ""}`} onClick={() => onChange(key)}>
+        <button key={key} className={`tab tab-${key} ${active === key ? "active" : ""}`} onClick={() => onChange(key)}>
           {label}
         </button>
       ))}
@@ -3120,7 +3183,24 @@ export default function App() {
   const [jobCards, setJobCards] = useState([]);
   const [retainers, setRetainers] = useState([]);
   const [currentRetainer, setCurrentRetainer] = useState(null);
-  const [view, setView] = useState("login");
+  const [view, setViewState] = useState("login");
+  // Remember where the user has been so the Back button works everywhere.
+  const viewRef = useRef("login");
+  const historyRef = useRef([]);
+  function setView(next) {
+    const prev = viewRef.current;
+    if (prev !== next) {
+      historyRef.current.push(prev);
+      if (historyRef.current.length > 40) historyRef.current.shift();
+    }
+    viewRef.current = next;
+    setViewState(next);
+  }
+  function resetView(next) {
+    historyRef.current = [];
+    viewRef.current = next;
+    setViewState(next);
+  }
   const [currentDoc, setCurrentDoc] = useState(null);
   const [formInitial, setFormInitial] = useState(null);
   const [currentJobCard, setCurrentJobCard] = useState(null);
@@ -3178,9 +3258,9 @@ export default function App() {
       await loadDocs(sessionObj.company.id);
       loadRetainers(sessionObj.company.id);
       setFilter("all");
-      setView("dashboard");
+      resetView("dashboard");
     } else {
-      setView("jobcards");
+      resetView("jobcards");
     }
   }
 
@@ -3190,7 +3270,7 @@ export default function App() {
     setCurrentRetainer(null);
     setDocs([]);
     setJobCards([]);
-    setView("login");
+    resetView("login");
   }
 
   const company = session?.company;
@@ -3246,9 +3326,11 @@ export default function App() {
   if (loading) {
     return (
       <div className="center-screen">
-        <p className="serif" style={{ fontSize: 18, color: "var(--ink-soft)" }}>
-          Loading Twofold…
-        </p>
+        <div className="brand-hero">
+          <JobflowLogo size={72} />
+          <JobflowWordmark big />
+          <p className="hint">Loading…</p>
+        </div>
       </div>
     );
   }
@@ -3283,6 +3365,32 @@ export default function App() {
   // Technicians can only ever reach job-card screens, regardless of what
   // view state may have been left over from before.
   const effectiveView = isAdmin ? view : view.startsWith("jobcard") ? view : "jobcards";
+  const homeView = isAdmin ? "dashboard" : "jobcards";
+  const FORM_VIEWS = ["newdoc", "jobcard-new"];
+  function confirmLeave() {
+    return !FORM_VIEWS.includes(viewRef.current) || confirm("Leave this page? Anything you haven't saved will be lost.");
+  }
+  appNav = {
+    atHome: effectiveView === homeView,
+    onHome: () => {
+      if (!confirmLeave()) return;
+      resetView(homeView);
+    },
+    onBack: () => {
+      if (!confirmLeave()) return;
+      const h = historyRef.current;
+      while (h.length) {
+        const prev = h.pop();
+        // Skip the login screen, half-filled forms and the page we're already on.
+        if (prev === "login" || FORM_VIEWS.includes(prev) || prev === viewRef.current) continue;
+        if (!isAdmin && !prev.startsWith("jobcard")) continue;
+        viewRef.current = prev;
+        setViewState(prev);
+        return;
+      }
+      resetView(homeView);
+    }
+  };
 
   if (effectiveView === "retainers" && isAdmin) {
     return (
