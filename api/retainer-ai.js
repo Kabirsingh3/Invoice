@@ -14,6 +14,8 @@
 const CLAUDE_MODEL = process.env.ANTHROPIC_MODEL || "claude-sonnet-5-5";
 // "gemini-flash-latest" always points to Google's current Flash model.
 const GEMINI_MODEL = process.env.GEMINI_MODEL || "gemini-flash-latest";
+// If the main model is busy or its free limit is used up, try these next.
+const GEMINI_FALLBACKS = ["gemini-flash-lite-latest"];
 
 function pickProvider() {
   const forced = (process.env.AI_PROVIDER || "").toLowerCase();
@@ -181,8 +183,35 @@ const GEMINI_SCHEMA = {
   required: ["reply"]
 };
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
 async function callGemini(system, convo) {
-  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent`;
+  const models = [GEMINI_MODEL, ...GEMINI_FALLBACKS.filter((m) => m !== GEMINI_MODEL)];
+  let last = null;
+  for (const model of models) {
+    // Up to 2 tries per model when Google says it's busy.
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const result = await callGeminiModel(model, system, convo);
+      if (!result.retry) return result;
+      last = result;
+      if (result.status === 503 || result.status === 500) {
+        if (attempt === 0) await sleep(2500);
+      } else {
+        break; // 429 (limit used up) or model not found: go straight to the next model
+      }
+    }
+  }
+  return {
+    status: last?.status || 503,
+    error:
+      last?.status === 429
+        ? "The free Google AI limit has been reached for now. Wait a minute and try again (or tomorrow if the daily limit is used up)."
+        : "Google's free AI is very busy right now. Wait a minute and tap Send again."
+  };
+}
+
+async function callGeminiModel(model, system, convo) {
+  const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const baseBody = {
     systemInstruction: { parts: [{ text: system }] },
     contents: convo.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
@@ -194,7 +223,7 @@ async function callGemini(system, convo) {
   };
   async function post(body) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 110000);
+    const timer = setTimeout(() => controller.abort(), 50000);
     try {
       return await fetch(url, {
         method: "POST",
@@ -216,19 +245,10 @@ async function callGemini(system, convo) {
     const errText = await aiRes.clone().text().catch(() => "");
     if (/thinking/i.test(errText)) aiRes = await post(baseBody);
   }
-  if (!aiRes) {
-    return { status: 504, error: "Google's AI took too long to answer. Try again, or ask for one thing at a time (e.g. just the price first)." };
-  }
+  if (!aiRes) return { retry: true, status: 504 }; // too slow: try the next model
+  if ([429, 500, 503, 404].includes(aiRes.status)) return { retry: true, status: aiRes.status };
   const data = await aiRes.json().catch(() => ({}));
-  if (!aiRes.ok) {
-    if (aiRes.status === 429) {
-      return {
-        status: 429,
-        error: "The free Google AI limit has been reached for now. Wait a minute and try again (or tomorrow if the daily limit is used up)."
-      };
-    }
-    return { error: data?.error?.message || `AI request failed (${aiRes.status})` };
-  }
+  if (!aiRes.ok) return { error: data?.error?.message || `AI request failed (${aiRes.status})` };
   const cand = data.candidates?.[0];
   if (!cand) {
     return { error: "Google's AI didn't return an answer" + (data.promptFeedback?.blockReason ? ` (${data.promptFeedback.blockReason})` : "") + ". Try rewording." };
@@ -315,4 +335,4 @@ export default async function handler(req, res) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong: " + (err?.message || String(err)) });
   }
-      }
+}
