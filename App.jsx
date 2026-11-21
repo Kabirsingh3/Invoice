@@ -835,6 +835,88 @@ function JobflowWordmark({ big = false }) {
   return <span className={`jf-word${big ? " jf-word-big" : ""}`}>Jobflow</span>;
 }
 
+// ---------------- Light / dark theme ----------------
+function getTheme() {
+  try {
+    const saved = localStorage.getItem("jf-theme");
+    if (saved === "light" || saved === "dark") return saved;
+  } catch (e) {}
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+}
+function applyTheme(t) {
+  document.documentElement.setAttribute("data-theme", t);
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", t === "dark" ? "#0B1016" : "#1B2430");
+}
+if (typeof document !== "undefined") applyTheme(getTheme());
+
+function ThemeToggle({ className = "tb-btn" }) {
+  const [theme, setTheme] = useState(() => document.documentElement.getAttribute("data-theme") || getTheme());
+  function toggle() {
+    const next = theme === "dark" ? "light" : "dark";
+    applyTheme(next);
+    try {
+      localStorage.setItem("jf-theme", next);
+    } catch (e) {}
+    setTheme(next);
+  }
+  return (
+    <button className={`${className} theme-btn`} onClick={toggle} aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"} title={theme === "dark" ? "Light mode" : "Dark mode"}>
+      <span className={`theme-ico ${theme}`} aria-hidden="true">
+        {theme === "dark" ? "☀" : "☾"}
+      </span>
+    </button>
+  );
+}
+
+// ---------------- Sign-in layout: brand panel with rotating messages ----------------
+const AUTH_SLIDES = [
+  ["Quote, job, invoice — done", "Send professional quotes and invoices in minutes, and turn an accepted quote into an invoice with one tap."],
+  ["Job cards from site", "Technicians log the work, spares, photos and hardware receipts on their phones. Download a clean PDF job card."],
+  ["Retainers made easy", "The AI assistant prices monthly maintenance contracts and writes the agreement for you."]
+];
+
+function AuthLayout({ children }) {
+  const [i, setI] = useState(0);
+  useEffect(() => {
+    const t = setInterval(() => setI((x) => (x + 1) % AUTH_SLIDES.length), 5500);
+    return () => clearInterval(t);
+  }, []);
+  return (
+    <div className="auth">
+      <aside className="auth-brand">
+        <div className="auth-glow" aria-hidden="true" />
+        <div className="auth-brand-top">
+          <JobflowLogo size={48} />
+          <JobflowWordmark />
+          <div className="auth-theme">
+            <ThemeToggle />
+          </div>
+        </div>
+        <div className="auth-hero">
+          <div className="auth-kicker">By Kabir Singh</div>
+          <p className="auth-lead">Your complete job platform — quotes, job cards, invoices, retainers and everything in between.</p>
+          <div className="auth-slides">
+            {AUTH_SLIDES.map(([title, text], k) => (
+              <div key={k} className={`auth-slide${k === i ? " on" : ""}`} aria-hidden={k !== i}>
+                <h3>{title}</h3>
+                <p>{text}</p>
+              </div>
+            ))}
+          </div>
+          <div className="auth-dots">
+            {AUTH_SLIDES.map((_, k) => (
+              <button key={k} className={k === i ? "on" : ""} onClick={() => setI(k)} aria-label={`Show message ${k + 1}`} />
+            ))}
+          </div>
+        </div>
+        <div className="auth-foot">© {new Date().getFullYear()} Jobflow</div>
+      </aside>
+      <main className="auth-main">{children}</main>
+    </div>
+  );
+}
+
 // Navigation set by <App> on every render (Back / Home buttons in the top bar).
 let appNav = { onBack: null, onHome: null, atHome: true };
 
@@ -856,18 +938,19 @@ function Topbar({ company, onLogout, onEdit, subtitle }) {
             <div className="topbar-sub">{company ? company.name + (subtitle ? ` · ${subtitle}` : "") : "Quotes, job cards & invoices"}</div>
           </div>
         </button>
-        {company && (
-          <div className="topbar-actions">
-            {onEdit && (
+        <div className="topbar-actions">
+          <ThemeToggle />
+          {company && onEdit && (
               <button className="tb-btn" onClick={onEdit}>
                 Settings
               </button>
             )}
+          {company && (
             <button className="tb-btn" onClick={onLogout}>
               Sign out
             </button>
-          </div>
-        )}
+          )}
+        </div>
       </div>
       {showNav && (
         <nav className="topbar-nav">
@@ -1028,14 +1111,8 @@ function Login({ companies, technicians, onLoggedIn }) {
 
   if (!picked) {
     return (
-      <>
-        <Topbar company={null} />
-        <div className="center-screen">
-          <div style={{ textAlign: "center", width: "100%" }}>
-            <div className="brand-hero">
-              <JobflowLogo size={72} />
-              <JobflowWordmark big />
-            </div>
+      <AuthLayout>
+          <div className="auth-card">
             <h1 className="pick-title">Choose a company to sign in</h1>
             <div className="company-tiles">
               {companies.map((c) => (
@@ -1050,8 +1127,7 @@ function Login({ companies, technicians, onLoggedIn }) {
               ))}
             </div>
           </div>
-        </div>
-      </>
+      </AuthLayout>
     );
   }
 
@@ -1077,14 +1153,8 @@ function Login({ companies, technicians, onLoggedIn }) {
   }
 
   return (
-    <>
-      <Topbar company={null} />
-      <div className="center-screen">
-        <div className="panel">
-          <div className="panel-brand">
-            <JobflowLogo size={44} />
-            <JobflowWordmark />
-          </div>
+    <AuthLayout>
+        <div className="panel auth-card">
           <h1>{picked.name}</h1>
           <p className="sub">Choose how you're signing in.</p>
           <div className="field">
@@ -1128,8 +1198,7 @@ function Login({ companies, technicians, onLoggedIn }) {
             ← Choose a different company
           </button>
         </div>
-      </div>
-    </>
+    </AuthLayout>
   );
 }
 
