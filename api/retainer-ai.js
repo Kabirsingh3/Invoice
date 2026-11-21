@@ -50,9 +50,9 @@ async function isAdmin(auth) {
   return !!(u && u.password === auth.password && (u.role === "admin" || u.role === "super_admin"));
 }
 
-function systemPrompt(company, retainer, provider) {
+function contextBlock(company, retainer) {
   const today = new Date().toISOString().slice(0, 10);
-  return `You are a pricing and contracts assistant built into the quoting app of a South African electrical (and plumbing) contracting business. Today is ${today}. All amounts are in South African Rand (R).
+  return `Today is ${today}. All amounts are in South African Rand (R).
 
 THE BUSINESS (the "Service Provider"):
 Name: ${company?.name || ""}
@@ -60,28 +60,7 @@ Address: ${company?.address || ""}
 Email: ${company?.email || ""}
 Phone: ${company?.phone || ""}
 
-YOUR JOB
-Help the owner work out a monthly maintenance retainer for a client and write the retainer agreement.
-1. Work out the price. When information is missing, ask short, specific questions (at most 3 at a time): type of client and property, number of sites/units/blocks, distance or travel, routine maintenance visits per month, emergency call-outs included per month, response times, hours of cover, the owner's normal hourly and call-out rates, whether materials are included, contract length, and whether the business is VAT-registered.
-   If the owner asks you to just work it out, use sensible assumptions for the South African market, state every assumption clearly, and show the calculation (e.g. hours x rate + travel + allowance for call-outs, then a retainer discount or margin). Round the monthly fee to a sensible figure. Show the workings in your reply.
-2. Fill in the details fields whenever you know or have proposed them.
-3. Write or update the agreement whenever you have enough information or the owner asks for a change. Always return the COMPLETE agreement text, not just the changed part.
-
-AGREEMENT CONTENT
-Plain, clear English. Include where relevant: parties; definitions; scope of services (what's included); exclusions; routine maintenance schedule; emergency call-outs and response times; after-hours work and rates for work outside the retainer; materials and parts (how they are charged); monthly fee, invoicing and payment terms (state whether amounts include or exclude VAT); late payment; annual price escalation; term, renewal and termination/notice; access to premises and the client's responsibilities; health and safety; certificates of compliance for electrical work where applicable; warranties on workmanship; limitation of liability; suspension for non-payment; disputes; general clauses; signatures.
-Do NOT mention plumbing certificates of compliance or PIRB. Do not invent registration numbers, VAT numbers or bank details; use a blank line like "_____________" where something is unknown.
-If the client may be a consumer, note in your reply (not in the agreement) that the Consumer Protection Act can affect fixed-term contracts and cancellation, and recommend the owner has the final template checked by a lawyer. Never claim the agreement is legally guaranteed.
-
-AGREEMENT FORMAT (so the app can turn it into a PDF)
-- Plain text only. No markdown bold, italics or tables.
-- Section headings on their own line starting with "## " (e.g. "## 3. Scope of Services").
-- Numbered clauses like "3.1 ..." on their own lines. Blank line between paragraphs.
-- Do not include a title line or signature block; the app adds those.
-
-REPLY STYLE
-The owner reads this on a phone. Keep replies short and practical. Use simple lists with "-" where helpful.
-
-CURRENT STATE OF THIS RETAINER
+CURRENT DETAILS OF THIS RETAINER
 ${JSON.stringify(
     {
       title: retainer?.title || "",
@@ -94,21 +73,55 @@ ${JSON.stringify(
     },
     null,
     2
-  )}
+  )}`;
+}
 
-CURRENT AGREEMENT TEXT:
-${retainer?.agreement_text ? retainer.agreement_text.slice(0, 30000) : "(none yet)"}
+function chatPrompt(company, retainer, provider) {
+  return `You are a pricing assistant built into the quoting app of a South African electrical (and plumbing) contracting business. You help the owner work out a monthly maintenance retainer for a client.
+${contextBlock(company, retainer)}
+
+AGREEMENT STATUS: ${retainer?.agreement_text ? "An agreement has already been written (the owner can see it on the Agreement tab)." : "No agreement written yet."}
+
+YOUR JOB
+1. Work out the price. When information is missing, ask short, specific questions (at most 3 at a time): type of client and property, number of sites/units/blocks, distance or travel, routine maintenance visits per month, emergency call-outs included per month, response times, hours of cover, the owner's normal hourly and call-out rates, whether materials are included, contract length, and whether the business is VAT-registered.
+   If the owner asks you to just work it out, use sensible assumptions for the South African market, state every assumption clearly, and show the calculation (e.g. hours x rate + travel + allowance for call-outs, then a retainer discount or margin). Round the monthly fee to a sensible figure.
+2. Fill in the details fields whenever you know or have proposed them.
+3. The agreement itself is written by a separate step of the app, NOT in your reply. Never paste agreement text or clauses into your reply. When the owner asks for the agreement, asks to change it, or agrees to your pricing and wants to proceed, set "write_agreement" to true and put clear instructions in "agreement_instructions" (everything the agreement must cover: scope, visits, call-outs, response times, rates, fee, VAT, term, notice, and any specific change the owner asked for). In your reply just say briefly that you're writing/updating it now. Do not say it is finished.
+If the client may be a consumer, mention once that the Consumer Protection Act can affect fixed-term contracts and that a lawyer should check the final template.
+
+REPLY STYLE
+The owner reads this on a phone. Keep replies short and practical. Use simple lists with "-" where helpful. No markdown bold.
 
 ${
     provider === "gemini"
-      ? `Always answer with a single JSON object with these keys: "reply" (string, required), "fields" (object with only the details you set or change: title, client_name, client_address, client_email, monthly_fee as a number, start_date as YYYY-MM-DD, term_months as a whole number), and "agreement_text" (the COMPLETE agreement; leave it out if the agreement doesn't change).`
+      ? `Always answer with a single JSON object: "reply" (string, required), "fields" (object with only the details you set or change: title, client_name, client_address, client_email, monthly_fee as a number, start_date as YYYY-MM-DD, term_months as a whole number), "write_agreement" (boolean), "agreement_instructions" (string).`
       : `Always answer by calling the "respond" tool.`
   }`;
 }
 
+function agreementPrompt(company, retainer) {
+  return `You write retainer agreements for a South African electrical (and plumbing) contracting business.
+${contextBlock(company, retainer)}
+
+CURRENT AGREEMENT TEXT:
+${retainer?.agreement_text ? retainer.agreement_text.slice(0, 30000) : "(none yet — write a new one)"}
+
+TASK
+Write the COMPLETE retainer agreement between the Service Provider and the client, following the instructions you are given. If there is a current agreement, keep everything that the instructions don't change.
+Plain, clear English. Include where relevant: parties; definitions; scope of services; exclusions; routine maintenance schedule; emergency call-outs and response times; after-hours work and rates for work outside the retainer; materials and parts; monthly fee, invoicing and payment terms (state whether amounts include or exclude VAT); late payment; annual price escalation; term, renewal and termination/notice; access to premises and the client's responsibilities; health and safety; certificates of compliance for electrical work where applicable; warranties on workmanship; limitation of liability; suspension for non-payment; disputes; general clauses.
+Do NOT mention plumbing certificates of compliance or PIRB. Do not invent registration numbers, VAT numbers or bank details; write "_____________" where something is unknown.
+
+FORMAT (the app turns this into a PDF)
+- Output ONLY the agreement text: no introduction, no comments, no code fences.
+- Plain text. No markdown bold, italics or tables.
+- Section headings on their own line starting with "## " (e.g. "## 3. Scope of Services").
+- Numbered clauses like "3.1 ..." on their own lines. Blank line between paragraphs.
+- No title line and no signature block; the app adds those.`;
+}
+
 const RESPOND_TOOL = {
   name: "respond",
-  description: "Reply to the owner and optionally update the retainer details and agreement.",
+  description: "Reply to the owner, optionally update the retainer details, and ask the app to write the agreement.",
   input_schema: {
     type: "object",
     properties: {
@@ -126,16 +139,14 @@ const RESPOND_TOOL = {
           term_months: { type: "integer" }
         }
       },
-      agreement_text: {
-        type: "string",
-        description: "The COMPLETE updated agreement text. Leave out if the agreement doesn't change in this turn."
-      }
+      write_agreement: { type: "boolean", description: "True when the agreement should now be written or updated." },
+      agreement_instructions: { type: "string", description: "What the agreement must contain / what to change." }
     },
     required: ["reply"]
   }
 };
 
-async function callClaude(system, convo) {
+async function callClaude(system, convo, plain = false) {
   const aiRes = await fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {
@@ -143,17 +154,18 @@ async function callClaude(system, convo) {
       "x-api-key": process.env.ANTHROPIC_API_KEY,
       "anthropic-version": "2023-06-01"
     },
-    body: JSON.stringify({
-      model: CLAUDE_MODEL,
-      max_tokens: 8000,
-      system,
-      tools: [RESPOND_TOOL],
-      tool_choice: { type: "tool", name: "respond" },
-      messages: convo
-    })
+    body: JSON.stringify(
+      plain
+        ? { model: CLAUDE_MODEL, max_tokens: 16000, system, messages: convo }
+        : { model: CLAUDE_MODEL, max_tokens: 4000, system, tools: [RESPOND_TOOL], tool_choice: { type: "tool", name: "respond" }, messages: convo }
+    )
   });
   const data = await aiRes.json();
   if (!aiRes.ok) return { error: data?.error?.message || `AI request failed (${aiRes.status})` };
+  if (plain) {
+    const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
+    return { text, truncated: data.stop_reason === "max_tokens" };
+  }
   const toolBlock = (data.content || []).find((b) => b.type === "tool_use" && b.name === "respond");
   if (!toolBlock) {
     const text = (data.content || []).filter((b) => b.type === "text").map((b) => b.text).join("\n");
@@ -178,20 +190,21 @@ const GEMINI_SCHEMA = {
         term_months: { type: "INTEGER" }
       }
     },
-    agreement_text: { type: "STRING" }
+    write_agreement: { type: "BOOLEAN" },
+    agreement_instructions: { type: "STRING" }
   },
   required: ["reply"]
 };
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-async function callGemini(system, convo) {
+async function callGemini(system, convo, plain = false) {
   const models = [GEMINI_MODEL, ...GEMINI_FALLBACKS.filter((m) => m !== GEMINI_MODEL)];
   let last = null;
   for (const model of models) {
     // Up to 2 tries per model when Google says it's busy.
     for (let attempt = 0; attempt < 2; attempt++) {
-      const result = await callGeminiModel(model, system, convo);
+      const result = await callGeminiModel(model, system, convo, plain);
       if (!result.retry) return result;
       last = result;
       if (result.status === 503 || result.status === 500) {
@@ -210,20 +223,18 @@ async function callGemini(system, convo) {
   };
 }
 
-async function callGeminiModel(model, system, convo) {
+async function callGeminiModel(model, system, convo, plain = false) {
   const url = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`;
   const baseBody = {
     systemInstruction: { parts: [{ text: system }] },
     contents: convo.map((m) => ({ role: m.role === "assistant" ? "model" : "user", parts: [{ text: m.content }] })),
-    generationConfig: {
-      responseMimeType: "application/json",
-      responseSchema: GEMINI_SCHEMA,
-      maxOutputTokens: 16384
-    }
+    generationConfig: plain
+      ? { maxOutputTokens: 24576 }
+      : { responseMimeType: "application/json", responseSchema: GEMINI_SCHEMA, maxOutputTokens: 8192 }
   };
   async function post(body) {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 50000);
+    const timer = setTimeout(() => controller.abort(), plain ? 100000 : 50000);
     try {
       return await fetch(url, {
         method: "POST",
@@ -255,6 +266,7 @@ async function callGeminiModel(model, system, convo) {
   }
   const text = (cand.content?.parts || []).filter((p) => !p.thought && typeof p.text === "string").map((p) => p.text).join("");
   const truncated = cand.finishReason === "MAX_TOKENS";
+  if (plain) return { text, truncated };
   let out;
   try {
     out = JSON.parse(text.replace(/^```(?:json)?\s*|\s*```$/g, ""));
@@ -310,27 +322,48 @@ export default async function handler(req, res) {
       else acc.push({ ...m });
       return acc;
     }, []);
-    if (!convo.length || convo[convo.length - 1].role !== "user") {
+    if (body.mode !== "agreement" && (!convo.length || convo[convo.length - 1].role !== "user")) {
       res.status(400).json({ error: "Type a message first." });
       return;
     }
 
-    const system = systemPrompt(company, retainer, provider);
+    if (body.mode === "agreement") {
+      // Write the full agreement as plain text (more reliable than inside JSON).
+      const instructions = (body.instructions || "").slice(0, 6000) || "Write the agreement based on the details and the conversation.";
+      const recent = convo.slice(-12).map((m) => `${m.role === "user" ? "Owner" : "Assistant"}: ${m.content}`).join("\n\n");
+      const ask = [{ role: "user", content: `CONVERSATION SO FAR:\n${recent}\n\nINSTRUCTIONS FOR THE AGREEMENT:\n${instructions}` }];
+      const sys = agreementPrompt(company, retainer);
+      const r = provider === "gemini" ? await callGemini(sys, ask, true) : await callClaude(sys, ask, true);
+      if (r.error) {
+        res.status(r.status || 502).json({ error: r.error });
+        return;
+      }
+      if (r.truncated) {
+        res.status(502).json({ error: "The agreement came out too long and got cut off. Try again, or ask for a shorter agreement." });
+        return;
+      }
+      const text = (r.text || "").replace(/^```[a-z]*\s*|\s*```$/gi, "").trim();
+      if (text.length < 200) {
+        res.status(502).json({ error: "The AI didn't return a full agreement. Please try again." });
+        return;
+      }
+      res.status(200).json({ agreement_text: text });
+      return;
+    }
+
+    const system = chatPrompt(company, retainer, provider);
     const result = provider === "gemini" ? await callGemini(system, convo) : await callClaude(system, convo);
     if (result.error) {
       res.status(result.status || 502).json({ error: result.error });
       return;
     }
     const out = result.out || {};
-    if (result.truncated) {
-      // The agreement got cut off; don't overwrite the existing one with half a document.
-      res.status(200).json({
-        reply: (out.reply || "") + "\n\n(The agreement was too long to finish in one go, so I didn't change it. Ask me to update one section at a time.)",
-        fields: out.fields || null
-      });
-      return;
-    }
-    res.status(200).json({ reply: out.reply || "", fields: out.fields || null, agreement_text: out.agreement_text || null });
+    res.status(200).json({
+      reply: out.reply || (result.truncated ? "Sorry, my answer got cut off. Please ask again." : ""),
+      fields: out.fields || null,
+      write_agreement: !!out.write_agreement,
+      agreement_instructions: out.agreement_instructions || ""
+    });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: "Something went wrong: " + (err?.message || String(err)) });
